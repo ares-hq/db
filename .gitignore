@@ -14,3 +14,9 @@ __pycache__/
 *.css
 *.png
 *.log
+
+### Database Files ###
+*.db
+*.db-client_wal_index
+*.db-shm
+*.db.wal

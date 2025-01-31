@@ -5,7 +5,8 @@ from API_Library.API_Models.Team import Team
 from API_Library.API_Models.Event import Event
 from API_Library.API_Models.Season import Season
 from API_Library.RobotMath import MatrixBuilder, MatrixMath as mm
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from dateutil import parser
 from tqdm import tqdm
 
 class FirstAPI:
@@ -13,15 +14,31 @@ class FirstAPI:
         base_url = "https://ftc-api.firstinspires.org/v2.0"
         self.client = APIClient(base_url)
 
-    def get_season_events(self, year: int):
+    def get_season_events(self, year=None):
         """
         Fetch a list of events for the given season.
         :param year: The year for which to fetch events.
         :return: List of event codes.
         """
+        year = year or self.find_year()
         params = APIParams(path_segments=[year, 'events'])
         response = self.client.api_request(params)
         return [event.get("code") for event in response.get('events', [])]
+    
+    def get_future_season_events(self, year=None):
+        """
+        Fetch a list of events for the given season.
+        :param year: The year for which to fetch events.
+        :return: List of event codes.
+        """
+        year = year or self.find_year()
+        today = datetime.now(timezone.utc).date()
+        yesterday = today - timedelta(days=7)
+
+        params = APIParams(path_segments=[year, 'events'])
+        response = self.client.api_request(params)
+        return [event.get("code") for event in response.get('events', []) 
+                if parser.isoparse(event.get("dateStart")).date() >= yesterday]
 
     def fetch_event_data(self, event, year):
         try:
@@ -35,9 +52,15 @@ class FirstAPI:
             print(f"Error fetching event data for {event}: {e}")
             return event, None
 
-    def get_season(self, year=None, debug=False):
+    def get_season(self, year=None, debug=False, events="Future"):
+        '''
+        Set Events to "All" to get all events for the season
+        '''
         year = year or self.find_year()
-        events = self.get_season_events(year=year)
+        if events == "All":
+            events = self.get_season_events(year=year)
+        else:
+            events = self.get_future_season_events(year=year)
         season = Season(seasonCode=year)
 
         progress_bar = None
@@ -185,8 +208,8 @@ class FirstAPI:
 
 def main():
     first_api = FirstAPI()
-    season = first_api.get_season(year=2024, debug=True)
-    print(f"Season Data: {season}")
+    season = first_api.get_season(debug=True)
+    # print(f"Season Data: {season}")
 
 if __name__ == "__main__":
     main()
