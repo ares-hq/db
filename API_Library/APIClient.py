@@ -1,6 +1,8 @@
 import os
 import requests
+from requests.adapters import HTTPAdapter
 from dotenv import load_dotenv
+from urllib3.util.retry import Retry
 
 class APIClient:
     """
@@ -21,6 +23,15 @@ class APIClient:
 
         self.session = requests.Session()
         self.session.auth = (self.username, self.password)
+        
+        adapter = HTTPAdapter(
+            pool_connections=500,
+            pool_maxsize=500,
+            max_retries=Retry(total=3, backoff_factor=0.3),
+            pool_block=True
+        )
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def build_url(self, apiParams):
         """
@@ -29,13 +40,10 @@ class APIClient:
         :param params: (dict, optional) Query parameters for the URL.
         :return: (str) Constructed URL.
         """
-        # Join the path segments to form the URL path
         path = "/".join(str(segment) for segment in apiParams.path_segments if segment)
 
-        # Initialize the URL
         url = f"{self.base_url}/{path}"
 
-        # If params are provided, format them into `key=value` pairs
         if apiParams.query_params:
             query_string = "&".join(f"{key}={value}" for key, value in apiParams.query_params.items())
             url = f"{url}?{query_string}"
