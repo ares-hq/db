@@ -117,7 +117,7 @@ class TeamDataProcessor:
     def close(self):
         pass
 
-def main(debug=True):
+def main(debug=False):
     if debug:
         logging.basicConfig(level=logging.INFO)
     processor = TeamDataProcessor()

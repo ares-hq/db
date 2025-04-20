@@ -1,0 +1,16 @@
+# Environment & HTTP
+python-dotenv
+requests
+urllib3
+
+# Supabase client
+supabase
+
+# Date parsing
+python-dateutil
+
+# Progress bars
+tqdm
+
+# Math & data structures
+numpy

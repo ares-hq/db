@@ -1,9 +1,9 @@
 #!/bin/bash
 
-SCRIPT_NAME="manage_database.py"
+SCRIPT_NAME="ManageDatabase.py"
 LOG_FILE="update.log"
 VENV_DIR=".venv"
-BRANCH="main"
+BRANCH="season2024"
 
 install_pip() {
     if ! command -v pip3 &> /dev/null; then
@@ -46,8 +46,8 @@ stop_process() {
 start_process() {
     stop_process
     echo "🚀 Running $SCRIPT_NAME..."
-    nohup python3 $SCRIPT_NAME > $LOG_FILE 2>&1 &
-    echo "✅ Script started in background."
+    python3 $SCRIPT_NAME
+    echo "✅ Script started finished."
 }
 
 install_pip
@@ -61,7 +61,7 @@ while true; do
     git fetch origin $BRANCH > fetch_output.log 2>&1
     if [ $? -ne 0 ]; then
         echo "❌ Git fetch failed! See fetch_output.log"
-        sleep 300
+        sleep 150
         continue
     fi
 
@@ -91,6 +91,6 @@ while true; do
     start_process
     echo "✅ Process complete..."
 
-    echo "⏱ Sleeping for 5 minutes..."
+    echo "⏱ Sleeping for 2.5 minutes..."
     sleep 300
 done
