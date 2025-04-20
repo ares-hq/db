@@ -40,13 +40,10 @@ class APIClient:
         :param params: (dict, optional) Query parameters for the URL.
         :return: (str) Constructed URL.
         """
-        # Join the path segments to form the URL path
         path = "/".join(str(segment) for segment in apiParams.path_segments if segment)
 
-        # Initialize the URL
         url = f"{self.base_url}/{path}"
 
-        # If params are provided, format them into `key=value` pairs
         if apiParams.query_params:
             query_string = "&".join(f"{key}={value}" for key, value in apiParams.query_params.items())
             url = f"{url}?{query_string}"

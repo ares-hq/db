@@ -30,29 +30,28 @@ class TeamDataProcessor:
         for row in existing_data:
             team_number = row["teamNumber"]
 
-            if team_number in self.team_data:
-                api_team = self.team_data[team_number]
+            api_team = self.team_data[team_number] if team_number in self.team_data else Team(overallOPR=-100)
 
-                if not force_update and api_team.overallOPR <= row.get("overallOPR", -1):
-                    db_team = Team(
-                        teamName=row["teamName"],
-                        sponsors=row["sponsors"],
-                        location=row["location"]
-                    )
-                    db_team.teamNumber = team_number
-                    db_team.autoOPR = row["autoOPR"]
-                    db_team.teleOPR = row["teleOPR"]
-                    db_team.endgameOPR = row["endgameOPR"]
-                    db_team.overallOPR = row["overallOPR"]
-                    db_team.penalties = row["penalties"]
-                    db_team.autoRank = row.get("autoRank")
-                    db_team.teleRank = row.get("teleRank")
-                    db_team.endgameRank = row.get("endgameRank")
-                    db_team.overallRank = row.get("overallRank")
-                    db_team.penaltyRank = row.get("penaltyRank")
-                    db_team.profileUpdate = row.get("profileUpdate")
-
-                    self.team_data[team_number] = db_team
+            if not force_update and api_team.overallOPR <= row.get("overallOPR", -1):
+                db_team = Team(
+                    teamName=row["teamName"],
+                    sponsors=row["sponsors"],
+                    location=row["location"],
+                    teamNumber = team_number,
+                    autoOPR = row["autoOPR"],
+                    teleOPR = row["teleOPR"],
+                    endgameOPR = row["endgameOPR"],
+                    overallOPR = row["overallOPR"],
+                    penalties = row["penalties"],
+                    autoRank = row.get("autoRank"),
+                    teleRank = row.get("teleRank"),
+                    endgameRank = row.get("endgameRank"),
+                    overallRank = row.get("overallRank"),
+                    penaltyRank = row.get("penaltyRank"),
+                    profileUpdate = row.get("profileUpdate"),
+                )
+                
+                self.team_data[team_number] = db_team
 
     def update_rankings(self):
         teams = list(self.team_data.values())
