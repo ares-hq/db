@@ -4,6 +4,7 @@ from API_Library import FirstAPI
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from API_Library.API_Models.Team import Team
+from datetime import datetime
 
 class TeamDataProcessor:
     def __init__(self, supabase_url=None, supabase_key=None):
@@ -18,9 +19,9 @@ class TeamDataProcessor:
         self.table = "season_2024"
         self.team_data = {}
 
-    def fetch_season_data(self):
+    def fetch_season_data(self, debug=False):
         first_api = FirstAPI()
-        season = first_api.get_season()
+        season = first_api.get_season(events="All", debug=debug)
         for team in season.teams.values():
             self.team_data[team.teamNumber] = team
 
@@ -49,6 +50,7 @@ class TeamDataProcessor:
                     overallRank = row.get("overallRank"),
                     penaltyRank = row.get("penaltyRank"),
                     profileUpdate = row.get("profileUpdate"),
+                    eventDate= row.get("eventDate")
                 )
                 
                 self.team_data[team_number] = db_team
@@ -73,12 +75,14 @@ class TeamDataProcessor:
 
         assign_rank("penalties", "penaltyRank", reverse=False)
 
-    def fetch_and_save_to_database(self, debug=False):
-        self.fetch_season_data()
-        self.merge_with_database()
+    def fetch_and_save_to_database(self, debug=False, force_update=False):
+        self.fetch_season_data(debug=debug)
+        self.merge_with_database(force_update=force_update)
         self.update_rankings()
 
         serializable_data = []
+        now = datetime.now()
+        formattedTime = now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
         for team_number, team_info in self.team_data.items():
             team_dict = {
                 "teamNumber": int(team_number),
@@ -95,7 +99,8 @@ class TeamDataProcessor:
                 "overallRank": int(team_info.overallRank) if team_info.overallRank is not None else None,
                 "penalties": float(team_info.penalties),
                 "penaltyRank": int(team_info.penaltyRank) if team_info.penaltyRank is not None else None,
-                "profileUpdate": team_info.profileUpdate
+                "profileUpdate": formattedTime,
+                "eventDate": team_info.eventDate
             }
             serializable_data.append(team_dict)
 

@@ -85,7 +85,7 @@ class FirstAPI:
                     team_info.endgameOPR = team_opr_values["endgame"][team_idx]
                     team_info.overallOPR = team_info.autoOPR + team_info.teleOPR
                     team_info.penalties = team_opr_values["penalties"][team_idx]
-                    team_info.profileUpdate = modified_on_match_data.get(team, 'Unknown')
+                    team_info.eventDate = modified_on_match_data.get(team, 'Unknown')
                     event_obj.teams.append(team_info)
 
                 season.events[event] = event_obj
