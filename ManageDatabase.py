@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from API_Library.API_Models.Team import Team
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 class TeamDataProcessor:
     def __init__(self, supabase_url=None, supabase_key=None):
@@ -81,7 +82,7 @@ class TeamDataProcessor:
         self.update_rankings()
 
         serializable_data = []
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
         formattedTime = now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
         for team_number, team_info in self.team_data.items():
             team_dict = {
