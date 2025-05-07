@@ -1,7 +1,7 @@
 import os
 import logging
 from API_Library import FirstAPI
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from supabase import create_client, Client
 from API_Library.API_Models.Team import Team
 from datetime import datetime
@@ -10,9 +10,10 @@ from zoneinfo import ZoneInfo
 class TeamDataProcessor:
     def __init__(self, supabase_url=None, supabase_key=None):
         if not supabase_url or not supabase_key:
-            load_dotenv()
+            load_dotenv(override=True)
             supabase_url = os.getenv("SUPABASE_URL")
             supabase_key = os.getenv("SUPABASE_KEY")
+            print(supabase_key)
             if not supabase_url or not supabase_key:
                 raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
         
@@ -22,7 +23,7 @@ class TeamDataProcessor:
 
     def fetch_season_data(self, debug=False):
         first_api = FirstAPI()
-        season = first_api.get_season(events="All", debug=debug)
+        season = first_api.get_season(debug=debug)
         for team in season.teams.values():
             self.team_data[team.teamNumber] = team
 
@@ -123,7 +124,7 @@ class TeamDataProcessor:
     def close(self):
         pass
 
-def main(debug=False):
+def main(debug=True):
     if debug:
         logging.basicConfig(level=logging.INFO)
     processor = TeamDataProcessor()
