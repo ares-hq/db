@@ -13,7 +13,6 @@ class TeamDataProcessor:
             load_dotenv(override=True)
             supabase_url = os.getenv("SUPABASE_URL")
             supabase_key = os.getenv("SUPABASE_KEY")
-            print(supabase_key)
             if not supabase_url or not supabase_key:
                 raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
         
@@ -52,7 +51,8 @@ class TeamDataProcessor:
                     overallRank = row.get("overallRank"),
                     penaltyRank = row.get("penaltyRank"),
                     profileUpdate = row.get("profileUpdate"),
-                    eventDate= row.get("eventDate")
+                    eventDate = row.get("eventDate"),
+                    teamLogo = row.get("teamLogo"),
                 )
                 
                 self.team_data[team_number] = db_team
@@ -74,7 +74,6 @@ class TeamDataProcessor:
         assign_rank("autoOPR", "autoRank")
         assign_rank("teleOPR", "teleRank")
         assign_rank("endgameOPR", "endgameRank")
-
         assign_rank("penalties", "penaltyRank", reverse=False)
 
     def fetch_and_save_to_database(self, debug=False, force_update=False):
@@ -102,10 +101,10 @@ class TeamDataProcessor:
                 "penalties": float(team_info.penalties),
                 "penaltyRank": int(team_info.penaltyRank) if team_info.penaltyRank is not None else None,
                 "profileUpdate": formattedTime,
-                "eventDate": team_info.eventDate
+                "eventDate": team_info.eventDate,
+                "teamLogo": team_info.teamLogo,
             }
             serializable_data.append(team_dict)
-
         if not serializable_data:
             logging.warning("No teams data to upsert; exiting.")
             return
@@ -124,7 +123,7 @@ class TeamDataProcessor:
     def close(self):
         pass
 
-def main(debug=True):
+def main(debug=False):
     if debug:
         logging.basicConfig(level=logging.INFO)
     processor = TeamDataProcessor()

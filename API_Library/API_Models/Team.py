@@ -38,6 +38,7 @@ class Team:
     penaltyRank: float = field(default_factory=float)
     profileUpdate: str = field(default_factory=str)
     eventDate: str = field(default_factory=str)
+    teamLogo: str = field(default_factory=str)
 
     def __post_init__(self):
         """Calculate overall OPR if not provided."""

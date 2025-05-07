@@ -1,4 +1,7 @@
 import os
+import re
+
+import requests
 from API_Library.APIClient import APIClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from API_Library.APIParams import APIParams
@@ -29,6 +32,20 @@ class FirstAPI:
         response = self.client.api_request(params)
         return [event.get("code") for event in response.get('events', []) if parser.isoparse(event.get("dateStart")).date() >= yesterday]
 
+    def get_team_logos(self) -> dict[int, str]:
+        url = "https://ftc-scoring.firstinspires.org/avatars/composed/2025.css"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            css = response.text
+
+            pattern = r"\.team-(\d+)\s*{\s*background-image:\s*url\(\"(data:image\/png;base64,[^\"]+)\"\);"
+            logos = {int(match[0]): match[1] for match in re.findall(pattern, css)}
+            return logos
+        except Exception as e:
+            print(f"Error fetching team logos: {e}")
+            return {}
+
     def get_season(self, year=None, debug=False, events="Future"):
         year = year or self.find_year()
         if events == "All":
@@ -36,21 +53,22 @@ class FirstAPI:
         else:
             events = self.get_future_season_events(year=year)
         season = Season(seasonCode=year)
+        logos = self.get_team_logos()
 
         progress_bar = tqdm(total=len(events), desc="Processing Events", unit=" event") if debug else None
 
         max_threads = min(128, os.cpu_count() * 8)
         with ThreadPoolExecutor(max_threads) as executor:
-            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar) for event in events]
+            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, logos) for event in events]
             for future in as_completed(futures):
                 future.result()
 
         if progress_bar:
             progress_bar.close()
-
+        
         return season
 
-    def fetch_event_data_thread(self, event, year, season, progress_bar):
+    def fetch_event_data_thread(self, event, year, season, progress_bar, logos):
         try:
             event_data = self.get_event_data(event, year)
             endgame_stats = self.get_endgame_stats(event, year)
@@ -86,6 +104,7 @@ class FirstAPI:
                     team_info.overallOPR = team_info.autoOPR + team_info.teleOPR
                     team_info.penalties = team_opr_values["penalties"][team_idx]
                     team_info.eventDate = modified_on_match_data.get(team, 'Unknown')
+                    team_info.teamLogo = logos.get(team)
                     event_obj.teams.append(team_info)
 
                 season.events[event] = event_obj
