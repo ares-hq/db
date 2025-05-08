@@ -7,13 +7,17 @@ class Alliance:
     team1: Team = field(default_factory=Team)
     team2: Team = field(default_factory=Team)
     color: str = field(default_factory=str)
+    date: str = field(default_factory=str)
     combined_autoOPR: float = 0.0
     combined_teleOPR: float = 0.0
     combined_endgameOPR: float = 0.0
     combined_penalties: float = 0.0
     combined_overallOPR: float = 0.0
+    skip: bool = False
 
     def __post_init__(self):
+        if self.skip:
+            return
         if self.team1 and self.team2:
             self.combined_autoOPR = self.team1.autoOPR + self.team2.autoOPR
             self.combined_teleOPR = self.team1.teleOPR + self.team2.teleOPR

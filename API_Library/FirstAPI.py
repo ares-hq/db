@@ -2,6 +2,7 @@ import os
 import re
 
 import requests
+from API_Library.MatchMaker import MatchMaker
 from API_Library.APIClient import APIClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from API_Library.APIParams import APIParams
@@ -54,25 +55,29 @@ class FirstAPI:
             events = self.get_future_season_events(year=year)
         season = Season(seasonCode=year)
         logos = self.get_team_logos()
+        match_maker = MatchMaker()
 
         progress_bar = tqdm(total=len(events), desc="Processing Events", unit=" event") if debug else None
 
         max_threads = min(128, os.cpu_count() * 8)
         with ThreadPoolExecutor(max_threads) as executor:
-            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, logos) for event in events]
+            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, logos, match_maker) for event in events]
             for future in as_completed(futures):
                 future.result()
+                
+        season.matches = match_maker.get_all_matches()
 
         if progress_bar:
             progress_bar.close()
-        
+
         return season
 
-    def fetch_event_data_thread(self, event, year, season, progress_bar, logos):
+    def fetch_event_data_thread(self, event, year, season, progress_bar, logos, match_maker):
         try:
             event_data = self.get_event_data(event, year)
             endgame_stats = self.get_endgame_stats(event, year)
             penalties = self.get_penalties(event, year)
+            match_maker.save_matches_for_event(event, event_data)
 
             if event_data:
                 modified_on_match_data = {}
@@ -160,7 +165,7 @@ class FirstAPI:
             location=f"{team_info.get('city', 'Unknown')}, {team_info.get('stateProv', 'Unknown')}, {team_info.get('country', 'Unknown')}"
         )
         return team
-
+    
     @staticmethod
     def find_year():
         current_date = datetime.now()

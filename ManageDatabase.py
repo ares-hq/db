@@ -18,13 +18,29 @@ class TeamDataProcessor:
         
         self.supabase: Client = create_client(supabase_url, supabase_key)
         self.table = "season_2024"
+        self.match_table = "matches_2024"
         self.team_data = {}
+        self.alliance_data = []
 
     def fetch_season_data(self, debug=False):
         first_api = FirstAPI()
         season = first_api.get_season(debug=debug)
         for team in season.teams.values():
             self.team_data[team.teamNumber] = team
+        self.alliance_data = self.convert_alliances_to_serializable_format(season.matches)
+        
+    def convert_alliances_to_serializable_format(self, matches_dict):
+        serializable = []
+        for dashcode, alliance in matches_dict.items():
+            serializable.append({
+                "matchcode": dashcode,
+                "team_1": int(alliance.team1.teamNumber),
+                "team_2": int(alliance.team2.teamNumber),
+                "totalPoints": int(alliance.combined_overallOPR),
+                "alliance": alliance.color,
+                "date": alliance.date,
+            })
+        return serializable
 
     def merge_with_database(self, force_update=False):
         existing_data = self.supabase.table(self.table).select("*").execute().data or []
@@ -105,19 +121,21 @@ class TeamDataProcessor:
                 "teamLogo": team_info.teamLogo,
             }
             serializable_data.append(team_dict)
-        if not serializable_data:
-            logging.warning("No teams data to upsert; exiting.")
-            return
-
-        resp = (
-            self.supabase
-            .table(self.table)
-            .upsert(serializable_data, on_conflict="teamNumber")
-            .execute()
-        )
+            
+        if serializable_data:
+            resp = (
+                self.supabase
+                .table(self.table)
+                .upsert(serializable_data, on_conflict="teamNumber")
+                .execute()
+            )
+            
+        if self.alliance_data:
+            self.supabase.table(self.match_table).upsert(self.alliance_data, on_conflict="matchcode").execute()
 
         count = len(resp.data or [])
         if debug:
+            print(f"✅ Upserted {len(self.alliance_data)} matches into `{self.match_table}`")
             print(f"✅ Upserted {count} rows into `{self.table}`")
 
     def close(self):

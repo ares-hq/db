@@ -1,6 +1,6 @@
 from dataclasses import dataclass,field
 from typing import Dict
-from .Event import Event, Team
+from .Event import Alliance, Event, Team
 
 @dataclass
 class Season:
@@ -16,6 +16,7 @@ class Season:
     numAwarded: int = field(default_factory=int)
     events: Dict[str, Event] = field(default_factory=dict)
     teams: Dict[int, Team] = field(default_factory=dict)
+    matches: Dict[str, Alliance] = field(default_factory=dict)
 
 @dataclass
 class History:
