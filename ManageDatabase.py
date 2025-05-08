@@ -43,7 +43,9 @@ class TeamDataProcessor:
         return serializable
 
     def merge_with_database(self, force_update=False):
-        existing_data = self.supabase.table(self.table).select("*").execute().data or []
+        existing_data = self.supabase.table(self.table).select(
+            "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate"
+        ).execute().data or []
 
         for row in existing_data:
             team_number = row["teamNumber"]
@@ -152,4 +154,4 @@ def main(debug=False):
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)
