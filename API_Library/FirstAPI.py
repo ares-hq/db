@@ -46,7 +46,14 @@ class FirstAPI:
         except Exception as e:
             print(f"Error fetching team logos: {e}")
             return {}
-
+        
+    def set_team_logos(self, teams: list[Team]):
+        logos = self.get_team_logos()
+        for team in teams:
+            logo = logos.get(team.teamNumber)
+            if logo:
+                team.teamLogo = logo
+                
     def get_season(self, year=None, debug=False, events="Future"):
         year = year or self.find_year()
         if events == "All":
@@ -54,14 +61,13 @@ class FirstAPI:
         else:
             events = self.get_future_season_events(year=year)
         season = Season(seasonCode=year)
-        logos = self.get_team_logos()
         match_maker = MatchMaker()
 
         progress_bar = tqdm(total=len(events), desc="Processing Events", unit=" event") if debug else None
 
         max_threads = min(128, os.cpu_count() * 8)
         with ThreadPoolExecutor(max_threads) as executor:
-            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, logos, match_maker) for event in events]
+            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, match_maker) for event in events]
             for future in as_completed(futures):
                 future.result()
                 
@@ -72,7 +78,7 @@ class FirstAPI:
 
         return season
 
-    def fetch_event_data_thread(self, event, year, season, progress_bar, logos, match_maker):
+    def fetch_event_data_thread(self, event, year, season, progress_bar, match_maker):
         try:
             event_data = self.get_event_data(event, year)
             endgame_stats = self.get_endgame_stats(event, year)
@@ -109,7 +115,6 @@ class FirstAPI:
                     team_info.overallOPR = team_info.autoOPR + team_info.teleOPR
                     team_info.penalties = team_opr_values["penalties"][team_idx]
                     team_info.eventDate = modified_on_match_data.get(team, 'Unknown')
-                    team_info.teamLogo = logos.get(team)
                     event_obj.teams.append(team_info)
 
                 season.events[event] = event_obj

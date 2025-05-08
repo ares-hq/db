@@ -1,7 +1,7 @@
 import os
 import logging
 from API_Library import FirstAPI
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 from supabase import create_client, Client
 from API_Library.API_Models.Team import Team
 from datetime import datetime
@@ -21,10 +21,10 @@ class TeamDataProcessor:
         self.match_table = "matches_2024"
         self.team_data = {}
         self.alliance_data = []
+        self.first_api = FirstAPI()
 
-    def fetch_season_data(self, debug=False):
-        first_api = FirstAPI()
-        season = first_api.get_season(debug=debug)
+    def fetch_season_data(self, debug=False, events='Future'):
+        season = self.first_api.get_season(debug=debug, events=events)
         for team in season.teams.values():
             self.team_data[team.teamNumber] = team
         self.alliance_data = self.convert_alliances_to_serializable_format(season.matches)
@@ -94,10 +94,11 @@ class TeamDataProcessor:
         assign_rank("endgameOPR", "endgameRank")
         assign_rank("penalties", "penaltyRank", reverse=False)
 
-    def fetch_and_save_to_database(self, debug=False, force_update=False):
-        self.fetch_season_data(debug=debug)
+    def fetch_and_save_to_database(self, debug=False, force_update=False, events='Future'):
+        self.fetch_season_data(debug=debug, events=events)
         self.merge_with_database(force_update=force_update)
         self.update_rankings()
+        self.first_api.set_team_logos(list(self.team_data.values()))
 
         serializable_data = []
         now = datetime.now(ZoneInfo("America/Los_Angeles"))
