@@ -155,4 +155,4 @@ def main(debug=False):
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main(debug=True)
+    main()
