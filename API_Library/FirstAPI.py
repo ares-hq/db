@@ -18,6 +18,7 @@ from tqdm import tqdm
 class FirstAPI:
     def __init__(self):
         self.client = APIClient("https://ftc-api.firstinspires.org/v2.0")
+        self.events_attended = {}
 
     def get_season_events(self, year: int):
         year = year or self.find_year()
@@ -67,7 +68,7 @@ class FirstAPI:
 
         max_threads = min(128, os.cpu_count() * 8)
         with ThreadPoolExecutor(max_threads) as executor:
-            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, match_maker) for event in events]
+            futures = [executor.submit(self.fetch_event_data_thread, event, year, season, progress_bar, match_maker, self.events_attended) for event in events]
             for future in as_completed(futures):
                 future.result()
                 
@@ -78,7 +79,7 @@ class FirstAPI:
 
         return season
 
-    def fetch_event_data_thread(self, event, year, season, progress_bar, match_maker):
+    def fetch_event_data_thread(self, event, year, season, progress_bar, match_maker, events_attended):
         try:
             event_data = self.get_event_data(event, year)
             endgame_stats = self.get_endgame_stats(event, year)
@@ -96,6 +97,7 @@ class FirstAPI:
                     })
                     for team in match['teams']:
                         team_number = team['teamNumber']
+                        events_attended.setdefault(team_number, set()).add(event)
                         modified_on_match_data.setdefault(team_number, match.get('modifiedOn', 'Unknown'))
 
                 matrix_builder = MatrixBuilder(event_data)
@@ -170,6 +172,7 @@ class FirstAPI:
             location=f"{team_info.get('city', 'Unknown')}, {team_info.get('stateProv', 'Unknown')}, {team_info.get('country', 'Unknown')}",
             website=team_info.get('website', 'Unknown'),
             founded=team_info.get('rookieYear', 0),
+            eventsAttended=len(self.events_attended.get(team_number, [])),
         )
         return team
     
