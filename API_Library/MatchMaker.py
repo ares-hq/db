@@ -27,6 +27,7 @@ class MatchMaker:
                 team2=Team(teamNumber=match.get('teams')[1]['teamNumber']),
                 combined_overallOPR=match.get('scoreRedFinal', 0),
                 date=match.get('actualStartTime', 'Unknown'),
+                matchType=match.get('tournamentLevel', 'Unknown'),
                 skip=True,
             )
             blueAlliance = Alliance(
@@ -35,6 +36,7 @@ class MatchMaker:
                 team2=Team(match.get('teams')[3]['teamNumber']),
                 combined_overallOPR=match.get('scoreBlueFinal', 0),
                 date=match.get('actualStartTime', 'Unknown'),
+                matchType=match.get('tournamentLevel', 'Unknown'),
                 skip=True,
             )
             

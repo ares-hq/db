@@ -39,10 +39,11 @@ class TeamDataProcessor:
                 "totalPoints": int(alliance.combined_overallOPR),
                 "alliance": alliance.color,
                 "date": alliance.date,
+                "matchType": alliance.matchType,
             })
         return serializable
 
-    def merge_with_database(self, force_update=False):
+    def merge_with_database(self, force_update=True):
         existing_data = self.supabase.table(self.table).select(
             "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate"
         ).execute().data or []
@@ -78,7 +79,7 @@ class TeamDataProcessor:
     def update_rankings(self):
         teams = list(self.team_data.values())
 
-        def assign_rank(key, rank_field=None, reverse=True):
+        def assign_rank(key, rank_field=None, reverse=False):
             sorted_teams = sorted(teams, key=lambda t: getattr(t, key), reverse=reverse)
             current_rank = 1
             for i, team in enumerate(sorted_teams):
@@ -149,10 +150,10 @@ def main(debug=False):
         logging.basicConfig(level=logging.INFO)
     processor = TeamDataProcessor()
     try:
-        processor.fetch_and_save_to_database(debug=debug)
+        processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
     finally:
         processor.close()
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)

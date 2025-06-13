@@ -8,6 +8,7 @@ class Alliance:
     team2: Team = field(default_factory=Team)
     color: str = field(default_factory=str)
     date: str = field(default_factory=str)
+    matchType: str = field(default_factory=str)
     combined_autoOPR: float = 0.0
     combined_teleOPR: float = 0.0
     combined_endgameOPR: float = 0.0
