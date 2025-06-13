@@ -72,6 +72,10 @@ class TeamDataProcessor:
                     profileUpdate = row.get("profileUpdate"),
                     eventDate = row.get("eventDate"),
                     teamLogo = row.get("teamLogo"),
+                    founded= row.get("founded", 0),
+                    website= row.get("website", ""),
+                    eventsAttended= row.get("eventsAttended", 0),
+                    averagePlace= row.get("averagePlace", 0.0),
                 )
                 
                 self.team_data[team_number] = db_team
@@ -123,6 +127,10 @@ class TeamDataProcessor:
                 "profileUpdate": formattedTime,
                 "eventDate": team_info.eventDate,
                 "teamLogo": team_info.teamLogo,
+                "founded": team_info.founded,
+                "website": team_info.website,
+                "eventsAttended": team_info.eventsAttended,
+                "averagePlace": team_info.averagePlace,
             }
             serializable_data.append(team_dict)
             

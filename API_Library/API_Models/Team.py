@@ -39,6 +39,10 @@ class Team:
     profileUpdate: str = field(default_factory=str)
     eventDate: str = field(default_factory=str)
     teamLogo: str = field(default_factory=str)
+    founded: int = field(default_factory=int)
+    website: str = field(default_factory=str)
+    eventsAttended: int = field(default_factory=int)
+    averagePlace: float = field(default_factory=float)
 
     def __post_init__(self):
         """Calculate overall OPR if not provided."""
