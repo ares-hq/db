@@ -6,7 +6,7 @@ from .Event import Alliance, Event, Team
 class Season:
     """
     Stats for Season.
-
+    
     Attributes:
         seasonCode (str): The code for the season. Example: '2021'.
         events (Dict[str, Event]): A dictionary mapping event codes to Event objects. Example: events['USAZTUQ'].

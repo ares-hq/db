@@ -27,6 +27,9 @@ class MatchMaker:
                 team2=Team(teamNumber=match.get('teams')[1]['teamNumber']),
                 combined_overallOPR=match.get('scoreRedFinal', 0),
                 date=match.get('actualStartTime', 'Unknown'),
+                win=match.get('scoreRedFinal') > match.get('scoreBlueFinal', 0),
+                tele=match.get('scoreRedFinal', 0) - match.get('scoreRedAuto', 0) - match.get('scoreBlueFoul', 0),
+                penalty=match.get('scoreRedFoul', 0),
                 matchType=match.get('tournamentLevel', 'Unknown'),
                 skip=True,
             )
@@ -36,6 +39,9 @@ class MatchMaker:
                 team2=Team(match.get('teams')[3]['teamNumber']),
                 combined_overallOPR=match.get('scoreBlueFinal', 0),
                 date=match.get('actualStartTime', 'Unknown'),
+                win=match.get('scoreBlueFinal') < match.get('scoreBlueFinal', 0),
+                tele=match.get('scoreBlueFinal', 0) - match.get('scoreBlueAuto', 0) - match.get('scoreRedFoul', 0),
+                penalty=match.get('scoreBlueFoul', 0),
                 matchType=match.get('tournamentLevel', 'Unknown'),
                 skip=True,
             )

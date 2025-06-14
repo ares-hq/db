@@ -41,6 +41,9 @@ class TeamDataProcessor:
                 "alliance": alliance.color,
                 "date": alliance.date,
                 "matchType": alliance.matchType,
+                "win": alliance.win,
+                "tele": int(alliance.tele),
+                "penalty": int(alliance.penalty),
             })
         return serializable
 

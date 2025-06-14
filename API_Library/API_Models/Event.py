@@ -9,6 +9,9 @@ class Alliance:
     color: str = field(default_factory=str)
     date: str = field(default_factory=str)
     matchType: str = field(default_factory=str)
+    win: bool = field(default_factory=bool)
+    tele: float = 0.0
+    penalty: float = 0.0
     combined_autoOPR: float = 0.0
     combined_teleOPR: float = 0.0
     combined_endgameOPR: float = 0.0
