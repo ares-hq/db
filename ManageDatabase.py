@@ -46,7 +46,7 @@ class TeamDataProcessor:
 
     def merge_with_database(self, force_update=True):
         existing_data = self.supabase.table(self.table).select(
-            "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate,eventsAttended"
+            "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate,eventsAttended,founded,website"
         ).execute().data or []
 
         for row in existing_data:
@@ -62,6 +62,10 @@ class TeamDataProcessor:
             new_api_events = api_team.eventsAttended if isinstance(api_team.eventsAttended, list) else []
             merged_events = sorted(existing_events.union(new_api_events))
             api_team.eventsAttended = merged_events
+            if not api_team.founded and row.get("founded"):
+                api_team.founded = row["founded"]
+            if not api_team.website and row.get("website"):
+                api_team.website = row["website"]
             self.team_data[team_number] = api_team
 
             if not force_update and api_team.overallOPR <= row.get("overallOPR", -1):
