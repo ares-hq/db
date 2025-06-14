@@ -1,3 +1,4 @@
+import ast
 import os
 import logging
 from API_Library import FirstAPI
@@ -45,21 +46,26 @@ class TeamDataProcessor:
 
     def merge_with_database(self, force_update=True):
         existing_data = self.supabase.table(self.table).select(
-            "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate"
+            "teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,autoRank,teleRank,endgameRank,overallRank,penalties,penaltyRank,profileUpdate,eventDate,eventsAttended"
         ).execute().data or []
 
         for row in existing_data:
             team_number = row["teamNumber"]
 
             api_team = self.team_data[team_number] if team_number in self.team_data else Team(overallOPR=-100)
-            existing_events = set(row.get("eventsAttended") or [])
+            events_raw = row.get("eventsAttended")
+            print(events_raw)
+            try:
+                parsed_events = ast.literal_eval(events_raw) if isinstance(events_raw, str) else events_raw
+                existing_events = set(parsed_events)
+            except Exception:
+                existing_events = set()
             new_api_events = api_team.eventsAttended if isinstance(api_team.eventsAttended, list) else []
             merged_events = sorted(existing_events.union(new_api_events))
             api_team.eventsAttended = merged_events
             self.team_data[team_number] = api_team
 
             if not force_update and api_team.overallOPR <= row.get("overallOPR", -1):
-                row["eventsAttended"] = merged_events
                 db_team = Team(
                     teamName=row["teamName"],
                     sponsors=row["sponsors"],
@@ -89,7 +95,7 @@ class TeamDataProcessor:
     def update_rankings(self):
         teams = list(self.team_data.values())
 
-        def assign_rank(key, rank_field=None, reverse=False):
+        def assign_rank(key, rank_field=None, reverse=True):
             sorted_teams = sorted(teams, key=lambda t: getattr(t, key), reverse=reverse)
             current_rank = 1
             for i, team in enumerate(sorted_teams):
@@ -173,4 +179,4 @@ def main(debug=False):
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)
