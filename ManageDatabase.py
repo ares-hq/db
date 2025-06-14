@@ -54,7 +54,6 @@ class TeamDataProcessor:
 
             api_team = self.team_data[team_number] if team_number in self.team_data else Team(overallOPR=-100)
             events_raw = row.get("eventsAttended")
-            print(events_raw)
             try:
                 parsed_events = ast.literal_eval(events_raw) if isinstance(events_raw, str) else events_raw
                 existing_events = set(parsed_events)
@@ -179,4 +178,4 @@ def main(debug=False):
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main(debug=True)
+    main()
