@@ -172,7 +172,7 @@ class FirstAPI:
             location=f"{team_info.get('city', 'Unknown')}, {team_info.get('stateProv', 'Unknown')}, {team_info.get('country', 'Unknown')}",
             website=team_info.get('website', 'Unknown'),
             founded=team_info.get('rookieYear', 0),
-            eventsAttended=len(self.events_attended.get(team_number, [])),
+            eventsAttended=list(self.events_attended.get(team_number, [])),
         )
         return team
     

@@ -52,8 +52,14 @@ class TeamDataProcessor:
             team_number = row["teamNumber"]
 
             api_team = self.team_data[team_number] if team_number in self.team_data else Team(overallOPR=-100)
+            existing_events = set(row.get("eventsAttended") or [])
+            new_api_events = api_team.eventsAttended if isinstance(api_team.eventsAttended, list) else []
+            merged_events = sorted(existing_events.union(new_api_events))
+            api_team.eventsAttended = merged_events
+            self.team_data[team_number] = api_team
 
             if not force_update and api_team.overallOPR <= row.get("overallOPR", -1):
+                row["eventsAttended"] = merged_events
                 db_team = Team(
                     teamName=row["teamName"],
                     sponsors=row["sponsors"],
@@ -74,7 +80,7 @@ class TeamDataProcessor:
                     teamLogo = row.get("teamLogo"),
                     founded= row.get("founded", 0),
                     website= row.get("website", ""),
-                    eventsAttended= row.get("eventsAttended", 0),
+                    eventsAttended=merged_events,
                     averagePlace= row.get("averagePlace", 0.0),
                 )
                 
@@ -158,10 +164,13 @@ def main(debug=False):
         logging.basicConfig(level=logging.INFO)
     processor = TeamDataProcessor()
     try:
-        processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
+        if debug:
+            processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
+        else: 
+            processor.fetch_and_save_to_database(debug=debug)
     finally:
         processor.close()
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main(debug=True)
+    main()
