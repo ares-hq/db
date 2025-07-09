@@ -1,0 +1,3 @@
+[submodule "API_Library/cache"]
+	path = API_Library/cache
+	url = https://github.com/ARES-Digital-Hub/ARES-Cache.git

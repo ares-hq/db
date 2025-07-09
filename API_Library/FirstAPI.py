@@ -2,9 +2,7 @@ import os
 from API_Library.APIClient import APIClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from API_Library.APIParams import APIParams
-from API_Library.API_Models.Team import Team
-from API_Library.API_Models.Event import Event
-from API_Library.API_Models.Season import Season
+from .cache.ares_cache import Team, Event, Season
 from API_Library.RobotMath import MatrixBuilder, MatrixMath as mm
 from datetime import datetime, timedelta, timezone
 from dateutil import parser

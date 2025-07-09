@@ -8,7 +8,7 @@ venv/
 
 ### Cached Data ###
 .history/
-__pycache__/
+**/__pycache__
 
 ### Unwanted Files ###
 *.css
