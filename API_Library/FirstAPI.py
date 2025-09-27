@@ -15,6 +15,8 @@ from dateutil import parser
 from datetime import datetime
 from tqdm import tqdm
 
+from API_Library.yearAdapters import DEFAULT_SCORE_ADAPTER, SCORE_ADAPTERS, Skystone2019Adapter
+
 class FirstAPI:
     def __init__(self):
         self.client = APIClient("https://ftc-api.firstinspires.org/v2.0")
@@ -100,7 +102,15 @@ class FirstAPI:
                         events_attended.setdefault(team_number, set()).add(event)
                         modified_on_match_data.setdefault(team_number, match.get('modifiedOn', 'Unknown'))
 
-                matrix_builder = MatrixBuilder(event_data)
+                adapter = SCORE_ADAPTERS.get(year, DEFAULT_SCORE_ADAPTER)
+                def _default_map_matches(raw_matches: list[dict]) -> list[dict]:
+                    return raw_matches
+
+                if hasattr(adapter, "map_matches"):
+                    matches = adapter.map_matches(event_data) 
+                else:
+                    matches = _default_map_matches(event_data)
+                matrix_builder = MatrixBuilder(matches)
                 team_opr_values = {
                     metric: mm.LSE(matrix_builder.binary_matrix, getattr(matrix_builder, f"{metric}_matrix"))
                     for metric in ["auto", "tele", "endgame", "penalties"]
@@ -116,7 +126,7 @@ class FirstAPI:
                     team_info.endgameOPR = team_opr_values["endgame"][team_idx]
                     team_info.overallOPR = team_info.autoOPR + team_info.teleOPR
                     team_info.penalties = team_opr_values["penalties"][team_idx]
-                    team_info.eventDate = modified_on_match_data.get(team, 'Unknown')
+                    team_info.eventDate = modified_on_match_data.get(team)
                     event_obj.teams.append(team_info)
 
                 season.events[event] = event_obj
@@ -136,27 +146,37 @@ class FirstAPI:
         params = APIParams(path_segments=[year, 'matches', eventCode])
         response = self.client.api_request(params)
         return response.get('matches', [])
-
+    
     def get_endgame_stats(self, eventCode, year=None):
         year = year or self.find_year()
         params = APIParams(path_segments=[year, 'scores', eventCode, 'qual'])
         response = self.client.api_request(params)
+
+        adapter = SCORE_ADAPTERS.get(year, DEFAULT_SCORE_ADAPTER)
         result = []
         for match in response.get('matchScores', []):
-            red = match["alliances"][1]["teleopParkPoints"] + match["alliances"][1]["teleopAscentPoints"]
-            blue = match["alliances"][0]["teleopParkPoints"] + match["alliances"][0]["teleopAscentPoints"]
-            result.append({"matchNumber": match["matchNumber"], "red": red, "blue": blue})
+            red, blue = adapter.endgame_points(match)
+            result.append({
+                "matchNumber": match.get("matchNumber"),
+                "red": red,
+                "blue": blue
+            })
         return result
 
     def get_penalties(self, eventCode, year=None):
         year = year or self.find_year()
         params = APIParams(path_segments=[year, 'scores', eventCode, 'qual'])
         response = self.client.api_request(params)
+
+        adapter = SCORE_ADAPTERS.get(year, DEFAULT_SCORE_ADAPTER)
         result = []
         for match in response.get('matchScores', []):
-            red = match["alliances"][1]["foulPointsCommitted"]
-            blue = match["alliances"][0]["foulPointsCommitted"]
-            result.append({"matchNumber": match["matchNumber"], "red": red, "blue": blue})
+            red, blue = adapter.penalties(match)
+            result.append({
+                "matchNumber": match.get("matchNumber"),
+                "red": red,
+                "blue": blue
+            })
         return result
 
     def get_team_info(self, team_number, year=None):

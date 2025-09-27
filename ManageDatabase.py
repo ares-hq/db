@@ -18,14 +18,16 @@ class TeamDataProcessor:
                 raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
         
         self.supabase: Client = create_client(supabase_url, supabase_key)
-        self.table = "season_2024"
-        self.match_table = "matches_2024"
+        # self.table = "season_2024"
+        # self.match_table = "matches_2024"
+        self.table = "season_2019"
+        self.match_table = "matches_2019"
         self.team_data = {}
         self.alliance_data = []
         self.first_api = FirstAPI()
 
-    def fetch_season_data(self, debug=False, events='Future'):
-        season = self.first_api.get_season(debug=debug, events=events)
+    def fetch_season_data(self,year, debug=False, events='Future'):
+        season = self.first_api.get_season(debug=debug, events=events, year=year)
         for team in season.teams.values():
             self.team_data[team.teamNumber] = team
         self.alliance_data = self.convert_alliances_to_serializable_format(season.matches)
@@ -87,8 +89,8 @@ class TeamDataProcessor:
                     endgameRank = row.get("endgameRank"),
                     overallRank = row.get("overallRank"),
                     penaltyRank = row.get("penaltyRank"),
-                    profileUpdate = row.get("profileUpdate"),
-                    eventDate = row.get("eventDate"),
+                    # profileUpdate = row.get("profileUpdate"),
+                    # eventDate = row.get("eventDate"),
                     teamLogo = row.get("teamLogo"),
                     founded= row.get("founded", 0),
                     website= row.get("website", ""),
@@ -117,8 +119,8 @@ class TeamDataProcessor:
         assign_rank("endgameOPR", "endgameRank")
         assign_rank("penalties", "penaltyRank", reverse=False)
 
-    def fetch_and_save_to_database(self, debug=False, force_update=False, events='Future'):
-        self.fetch_season_data(debug=debug, events=events)
+    def fetch_and_save_to_database(self, year, debug=False, force_update=False, events='Future'):
+        self.fetch_season_data(debug=debug, events=events, year=year)
         self.merge_with_database(force_update=force_update)
         self.update_rankings()
         self.first_api.set_team_logos(list(self.team_data.values()))
@@ -143,7 +145,7 @@ class TeamDataProcessor:
                 "penalties": float(team_info.penalties),
                 "penaltyRank": int(team_info.penaltyRank) if team_info.penaltyRank is not None else None,
                 "profileUpdate": formattedTime,
-                "eventDate": team_info.eventDate,
+                # "eventDate": team_info.eventDate,
                 "teamLogo": team_info.teamLogo,
                 "founded": team_info.founded,
                 "website": team_info.website,
@@ -152,6 +154,7 @@ class TeamDataProcessor:
             }
             serializable_data.append(team_dict)
             
+        resp = None
         if serializable_data:
             resp = (
                 self.supabase
@@ -163,7 +166,8 @@ class TeamDataProcessor:
         if self.alliance_data:
             self.supabase.table(self.match_table).upsert(self.alliance_data, on_conflict="matchcode").execute()
 
-        count = len(resp.data or [])
+
+        count = len(resp and resp.data or [])
         if debug:
             print(f"✅ Upserted {len(self.alliance_data)} matches into `{self.match_table}`")
             print(f"✅ Upserted {count} rows into `{self.table}`")
@@ -177,12 +181,12 @@ def main(debug=False):
     processor = TeamDataProcessor()
     try:
         if debug:
-            processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
-        else: 
-            processor.fetch_and_save_to_database(debug=debug)
+            processor.fetch_and_save_to_database(year=2019, debug=debug, force_update=True, events='All')
+        else:
+            processor.fetch_and_save_to_database(year=2019, debug=debug)
     finally:
         processor.close()
         logging.info("Done.")
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)
