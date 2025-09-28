@@ -18,10 +18,8 @@ class TeamDataProcessor:
                 raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
         
         self.supabase: Client = create_client(supabase_url, supabase_key)
-        # self.table = "season_2024"
-        # self.match_table = "matches_2024"
-        self.table = "season_2019"
-        self.match_table = "matches_2019"
+        self.table = "season_2025"
+        self.match_table = "matches_2025"
         self.team_data = {}
         self.alliance_data = []
         self.first_api = FirstAPI()
@@ -181,9 +179,9 @@ def main(debug=False):
     processor = TeamDataProcessor()
     try:
         if debug:
-            processor.fetch_and_save_to_database(year=2019, debug=debug, force_update=True, events='All')
+            processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
         else:
-            processor.fetch_and_save_to_database(year=2019, debug=debug)
+            processor.fetch_and_save_to_database(debug=debug)
     finally:
         processor.close()
         logging.info("Done.")

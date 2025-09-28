@@ -15,7 +15,7 @@ from dateutil import parser
 from datetime import datetime
 from tqdm import tqdm
 
-from API_Library.yearAdapters import DEFAULT_SCORE_ADAPTER, SCORE_ADAPTERS, Skystone2019Adapter
+from API_Library.YearAdapters import DEFAULT_SCORE_ADAPTER, SCORE_ADAPTERS
 
 class FirstAPI:
     def __init__(self):
@@ -87,7 +87,6 @@ class FirstAPI:
             endgame_stats = self.get_endgame_stats(event, year)
             penalties = self.get_penalties(event, year)
             match_maker.save_matches_for_event(event, event_data)
-
             if event_data:
                 modified_on_match_data = {}
                 for match, endgame, penalty in zip(event_data, endgame_stats, penalties):
@@ -103,14 +102,13 @@ class FirstAPI:
                         modified_on_match_data.setdefault(team_number, match.get('modifiedOn', 'Unknown'))
 
                 adapter = SCORE_ADAPTERS.get(year, DEFAULT_SCORE_ADAPTER)
-                def _default_map_matches(raw_matches: list[dict]) -> list[dict]:
-                    return raw_matches
-
                 if hasattr(adapter, "map_matches"):
                     matches = adapter.map_matches(event_data) 
                 else:
-                    matches = _default_map_matches(event_data)
+                    matches = event_data
+
                 matrix_builder = MatrixBuilder(matches)
+
                 team_opr_values = {
                     metric: mm.LSE(matrix_builder.binary_matrix, getattr(matrix_builder, f"{metric}_matrix"))
                     for metric in ["auto", "tele", "endgame", "penalties"]
@@ -157,10 +155,11 @@ class FirstAPI:
         for match in response.get('matchScores', []):
             red, blue = adapter.endgame_points(match)
             result.append({
-                "matchNumber": match.get("matchNumber"),
+                "matchNumber": match["matchNumber"],
                 "red": red,
                 "blue": blue
             })
+
         return result
 
     def get_penalties(self, eventCode, year=None):
@@ -173,7 +172,7 @@ class FirstAPI:
         for match in response.get('matchScores', []):
             red, blue = adapter.penalties(match)
             result.append({
-                "matchNumber": match.get("matchNumber"),
+                "matchNumber": match["matchNumber"],
                 "red": red,
                 "blue": blue
             })
@@ -197,9 +196,9 @@ class FirstAPI:
         return team
     
     @staticmethod
-    def find_year():
-        current_date = datetime.now()
-        return current_date.year - 1 if current_date.month < 8 else current_date.year
+    def find_year(date = datetime.now()) -> int:
+        date = date if isinstance(date, datetime) else parser.isoparse(date)
+        return date.year - 1 if date.month < 8 else date.year
 
 def main():
     first_api = FirstAPI()
