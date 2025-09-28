@@ -37,6 +37,12 @@ class Team:
     penalties: float = field(default_factory=float)
     penaltyRank: float = field(default_factory=float)
     profileUpdate: str = field(default_factory=str)
+    eventDate: str = field(default_factory=str)
+    teamLogo: str = field(default_factory=str)
+    founded: int = field(default_factory=int)
+    website: str = field(default_factory=str)
+    eventsAttended: int = field(default_factory=int)
+    averagePlace: float = field(default_factory=float)
 
     def __post_init__(self):
         """Calculate overall OPR if not provided."""
@@ -55,6 +61,7 @@ class Team:
             f"Endgame OPR: {self.endgameOPR:.2f} (Rank: {self.endgameRank})\n"
             f"Overall OPR: {self.overallOPR:.2f} (Rank: {self.overallRank})\n"
             f"Penalties OPR: {self.penalties:.2f} (Rank: {self.penaltyRank})\n"
+            f"Event Date: {self.eventDate}\n"
             f"Last Updated: {self.profileUpdate}"
         )
 

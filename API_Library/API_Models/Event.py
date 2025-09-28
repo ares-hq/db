@@ -7,21 +7,33 @@ class Alliance:
     team1: Team = field(default_factory=Team)
     team2: Team = field(default_factory=Team)
     color: str = field(default_factory=str)
+    date: str = field(default_factory=str)
+    matchType: str = field(default_factory=str)
+    win: bool = field(default_factory=bool)
+    tele: float = 0.0
+    penalty: float = 0.0
     combined_autoOPR: float = 0.0
     combined_teleOPR: float = 0.0
     combined_endgameOPR: float = 0.0
     combined_penalties: float = 0.0
     combined_overallOPR: float = 0.0
+    skip: bool = False
 
     def __post_init__(self):
-        self.combined_autoOPR = self.team1.autoOPR + self.team2.autoOPR
-        self.combined_teleOPR = self.team1.teleOPR + self.team2.teleOPR
-        self.combined_endgameOPR = self.team1.endgameOPR + self.team2.endgameOPR
-        self.combined_penalties = self.team1.penalties + self.team2.penalties
-        self.combined_overallOPR = self.combined_autoOPR + self.combined_teleOPR + self.combined_endgameOPR
+        if self.skip:
+            return
+        if self.team1 and self.team2:
+            self.combined_autoOPR = self.team1.autoOPR + self.team2.autoOPR
+            self.combined_teleOPR = self.team1.teleOPR + self.team2.teleOPR
+            self.combined_endgameOPR = self.team1.endgameOPR + self.team2.endgameOPR
+            self.combined_penalties = self.team1.penalties + self.team2.penalties
+            self.combined_overallOPR = self.combined_autoOPR + self.combined_teleOPR + self.combined_endgameOPR
 
-        self.teamNums: List[int] = [self.team1.teamNumber, self.team2.teamNumber]
-        self.teamNames: List[str] = [self.team1.teamName, self.team2.teamName]
+            self.teamNums: List[int] = [self.team1.teamNumber, self.team2.teamNumber]
+            self.teamNames: List[str] = [self.team1.teamName, self.team2.teamName]
+        else: 
+            self.teamNums: List[int] = [0, 0]
+            self.teamNames: List[str] = ["", ""]
 
         self.scoreboard: List[str] = [
             f"{self.teamNums[0]}",

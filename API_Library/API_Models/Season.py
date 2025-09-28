@@ -1,12 +1,12 @@
 from dataclasses import dataclass,field
 from typing import Dict
-from .Event import Event, Team
+from .Event import Alliance, Event, Team
 
 @dataclass
 class Season:
     """
     Stats for Season.
-
+    
     Attributes:
         seasonCode (str): The code for the season. Example: '2021'.
         events (Dict[str, Event]): A dictionary mapping event codes to Event objects. Example: events['USAZTUQ'].
@@ -16,6 +16,7 @@ class Season:
     numAwarded: int = field(default_factory=int)
     events: Dict[str, Event] = field(default_factory=dict)
     teams: Dict[int, Team] = field(default_factory=dict)
+    matches: Dict[str, Alliance] = field(default_factory=dict)
 
 @dataclass
 class History:
