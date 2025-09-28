@@ -179,9 +179,9 @@ def main(debug=False):
     processor = TeamDataProcessor()
     try:
         if debug:
-            processor.fetch_and_save_to_database(debug=debug, force_update=True, events='All')
+            processor.fetch_and_save_to_database(year=2025, debug=debug, force_update=True, events='All')
         else:
-            processor.fetch_and_save_to_database(debug=debug)
+            processor.fetch_and_save_to_database(year=2025, debug=debug)
     finally:
         processor.close()
         logging.info("Done.")
