@@ -202,7 +202,7 @@ class FirstAPI:
 
 def main():
     first_api = FirstAPI()
-    season = first_api.get_season(year=2024, debug=True)
+    season = first_api.get_season(year=2025, debug=True)
     print(f"Season Data: {season}")
 
 if __name__ == "__main__":

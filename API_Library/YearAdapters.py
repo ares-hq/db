@@ -121,8 +121,8 @@ class Decode2025Adapter:
       ... endGamePoints, penaltyPoints, totalPoints, autonomousPoints, etc.
     """
     def endgame_points(self, match: Dict[str, Any]) -> Tuple[int, int]:
-        red = match["alliances"][1]["endgamePoints"]
-        blue = match["alliances"][0]["endgamePoints"]
+        red = match["alliances"][1]["teleopBasePoints"]
+        blue = match["alliances"][0]["teleopBasePoints"]
         return red, blue
 
     def penalties(self, match: Dict[str, Any]) -> Tuple[int, int]:
