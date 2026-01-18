@@ -51,7 +51,7 @@ class MatrixBuilder():
                 This calls 'onField', which checks to see if a team is on the field during this match.
                 However, this is not used in normal OPR calculations so it is subject to change.
                 '''
-                if 'Qualification' in match['description'] and team['onField']:
+                if 'Qualification' in match['description'] and (team.get("onField", True) or match['actualStartTime'] < "2021-08-01"):
                     if "Red" in station:
                         self.binary_matrix[2*match_idx, team_idx] = 1
                     elif "Blue" in station:
