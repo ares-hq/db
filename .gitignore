@@ -19,3 +19,6 @@
 *.db-client_wal_index
 *.db-shm
 *.db-wal
+
+# Rust
+/target

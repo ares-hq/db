@@ -1,3 +1,0 @@
-[submodule "cache"]
-	path = API_Library/cache
-	url = https://github.com/ares-hq/cache.git

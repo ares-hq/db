@@ -1,43 +1,33 @@
 #!/bin/bash
 
-SCRIPT_NAME="ManageDatabase.py"
+BINARY_NAME="db"
 LOG_FILE="update.log"
-VENV_DIR=".venv"
-BRANCH="season2024"
+BRANCH="main"
 
-install_pip() {
-    if ! command -v pip3 &> /dev/null; then
-        echo "pip3 not found. Installing pip3..."
-        sudo apt update
-        sudo apt install -y python3-pip
+check_rust() {
+    if ! command -v cargo &> /dev/null; then
+        echo "Rust/Cargo not found. Please install from https://rustup.rs/"
+        exit 1
     else
-        echo "✅ pip3 is already installed."
+        echo "Cargo is installed."
     fi
 }
 
-create_venv() {
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "🧪 Creating virtual environment..."
-        python3 -m venv $VENV_DIR
+build_binary() {
+    echo "Building Rust binary..."
+    cargo build --release
+    if [ $? -ne 0 ]; then
+        echo "Build failed!"
+        exit 1
     fi
-    echo "✅ Activating virtual environment..."
-    source $VENV_DIR/bin/activate
-}
-
-install_requirements() {
-    if [ -f "requirements.txt" ]; then
-        echo "📦 Installing dependencies from requirements.txt..."
-        pip install -r requirements.txt
-    else
-        echo "⚠️ requirements.txt not found. Skipping installation."
-    fi
+    echo "Build complete"
 }
 
 stop_process() {
     local PIDS
-    PIDS=$(pgrep -f "$SCRIPT_NAME")
+    PIDS=$(pgrep -f "target/release/$BINARY_NAME")
     if [ -n "$PIDS" ]; then
-        echo "🛑 Stopping running process: $PIDS"
+        echo "Stopping running process: $PIDS"
         kill $PIDS
         wait $PIDS 2>/dev/null
     fi
@@ -45,22 +35,21 @@ stop_process() {
 
 start_process() {
     stop_process
-    echo "🚀 Running $SCRIPT_NAME..."
-    python3 $SCRIPT_NAME
-    echo "✅ Script started finished."
+    echo "Running $BINARY_NAME..."
+    ./target/release/$BINARY_NAME
+    echo "Script finished."
 }
 
-install_pip
-create_venv
-install_requirements
+check_rust
+build_binary
 start_process
 
 while true; do
-    echo "[$(date)] 🔍 Checking for Git updates..."
+    echo "[$(date)] Checking for Git updates..."
 
     git fetch origin $BRANCH > fetch_output.log 2>&1
     if [ $? -ne 0 ]; then
-        echo "❌ Git fetch failed! See fetch_output.log"
+        echo "Git fetch failed! See fetch_output.log"
         sleep 150
         continue
     fi
@@ -68,29 +57,29 @@ while true; do
     LOCAL=$(git rev-parse HEAD)
     REMOTE=$(git rev-parse origin/$BRANCH)
 
-    echo "🔍 LOCAL: $LOCAL"
-    echo "🔍 REMOTE: $REMOTE"
+    echo "LOCAL: $LOCAL"
+    echo "REMOTE: $REMOTE"
 
     if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "📥 Changes detected. Pulling latest from $BRANCH..."
+        echo "Changes detected. Pulling latest from $BRANCH..."
         git reset --hard origin/$BRANCH > pull_output.log 2>&1
 
         if [ $? -ne 0 ]; then
-            echo "❌ Git pull failed! See pull_output.log"
+            echo "Git pull failed! See pull_output.log"
             sleep 300
             continue
         fi
 
-        echo "📦 Updating dependencies..."
-        install_requirements
+        echo "Rebuilding binary..."
+        build_binary
     else
-        echo "✅ No updates found."
+        echo "No updates found."
     fi
 
-    echo "🔄 Restarting process..."
+    echo "Restarting process..."
     start_process
-    echo "✅ Process complete..."
+    echo "Process complete..."
 
-    echo "⏱ Sleeping for 2.5 minutes..."
+    echo "Sleeping for 2.5 minutes..."
     sleep 300
 done
