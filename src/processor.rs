@@ -1,162 +1,258 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use model::prelude::{Supabase, Team};
+
+use crate::matches::MatchRow;
 use chrono::Utc;
-use serde_json::{json, Value};
 use std::collections::HashMap;
 
 use crate::config::Config;
-use crate::first_api::TeamOpr;
 
 pub struct Processor {
-    config: Config,
-    supabase_client: postgrest::Postgrest,
+    client: Supabase,
+    table: String,
+    match_table: String,
 }
 
 impl Processor {
-    pub fn new(config: Config) -> Self {
-        let supabase_client = postgrest::Postgrest::new(&config.supabase_url)
-            .insert_header("apikey", &config.supabase_key)
-            .insert_header("Authorization", format!("Bearer {}", &config.supabase_key));
-
+    pub fn new(config: Config, year: i32) -> Self {
         Self {
-            config,
-            supabase_client,
+            client: Supabase::new(&config.supabase_url, config.supabase_key),
+            table: format!("season_{year}"),
+            match_table: format!("matches_{year}"),
         }
     }
 
-    pub async fn merge_with_database(&self, mut teams: HashMap<i32, TeamOpr>, force_update: bool) -> Result<HashMap<i32, TeamOpr>> {
-        let existing = self
-            .supabase_client
-            .from(&self.config.season_table)
-            .select("teamNumber,teamName,sponsors,location,autoOPR,teleOPR,endgameOPR,overallOPR,penalties,autoRank,teleRank,endgameRank,overallRank,penaltyRank,eventsAttended,founded,website")
-            .execute()
-            .await
-            .context("failed to fetch existing teams from database")?
-            .text()
-            .await
-            .context("failed to read response body")?;
+    /// Upserts raw match results, keyed on `matchcode`.
+    pub async fn upsert_matches(&self, matches: &[MatchRow]) -> Result<()> {
+        let count = matches.len();
+        self.client
+            .upsert(&self.match_table, matches, Some("matchcode"))
+            .await?;
+        if count > 0 {
+            tracing::info!("✅ Upserted {count} match rows to database");
+        }
+        Ok(())
+    }
 
-        let existing_teams: Vec<Value> = serde_json::from_str(&existing).unwrap_or_default();
+    pub async fn merge_with_database(
+        &self,
+        mut teams: HashMap<u32, Team>,
+        force_update: bool,
+    ) -> Result<HashMap<u32, Team>> {
+        let stored = self.client.teams(&self.table).await?;
 
-        for row in existing_teams {
-            let team_number = row["teamNumber"].as_i64().unwrap_or(0) as i32;
-            let existing_opr = row["overallOPR"].as_f64().unwrap_or(-100.0);
+        for row in stored {
+            let Some(team) = teams.get_mut(&row.number) else {
+                continue;
+            };
 
-            if let Some(team) = teams.get_mut(&team_number) {
-                let events_str = row["eventsAttended"].as_str().unwrap_or("[]");
-                let existing_events: Vec<String> = serde_json::from_str(events_str).unwrap_or_default();
-                let mut merged: Vec<String> = existing_events
-                    .into_iter()
-                    .chain(team.events_attended.clone())
-                    .collect::<std::collections::HashSet<_>>()
-                    .into_iter()
-                    .collect();
-                merged.sort();
-                team.events_attended = merged;
+            team.add_events(row.events_attended.clone());
+            team.founded = team.founded.or(row.founded);
+            team.website = team.website.take().or_else(|| row.website.clone());
 
-                if team.founded.is_none() {
-                    team.founded = row["founded"].as_i64().map(|v| v as i32);
-                }
-                if team.website.is_none() {
-                    team.website = row["website"].as_str().map(|s| s.to_owned());
-                }
-
-                if !force_update && team.overall_opr <= existing_opr {
-                    team.team_name = row["teamName"].as_str().unwrap_or("Unknown").to_owned();
-                    team.sponsors = row["sponsors"].as_str().unwrap_or("Unknown").to_owned();
-                    team.location = row["location"].as_str().unwrap_or("Unknown").to_owned();
-                    team.auto_opr = row["autoOPR"].as_f64().unwrap_or(0.0);
-                    team.tele_opr = row["teleOPR"].as_f64().unwrap_or(0.0);
-                    team.endgame_opr = row["endgameOPR"].as_f64().unwrap_or(0.0);
-                    team.overall_opr = existing_opr;
-                    team.penalties = row["penalties"].as_f64().unwrap_or(0.0);
-                    team.auto_rank = row["autoRank"].as_i64().map(|v| v as i32);
-                    team.tele_rank = row["teleRank"].as_i64().map(|v| v as i32);
-                    team.endgame_rank = row["endgameRank"].as_i64().map(|v| v as i32);
-                    team.overall_rank = row["overallRank"].as_i64().map(|v| v as i32);
-                    team.penalty_rank = row["penaltyRank"].as_i64().map(|v| v as i32);
-                }
+            // The stored row came from a stronger event; keep it.
+            if !force_update && team.overall <= row.overall {
+                *team = Team {
+                    events_attended: std::mem::take(&mut team.events_attended),
+                    founded: team.founded,
+                    website: team.website.take(),
+                    last_match: team.last_match,
+                    last_checked: team.last_checked,
+                    ..row
+                };
             }
         }
 
         Ok(teams)
     }
 
-    pub fn update_rankings(&self, teams: &mut HashMap<i32, TeamOpr>) {
-        let mut team_list: Vec<&mut TeamOpr> = teams.values_mut().collect();
+    pub fn rank(teams: &mut HashMap<u32, Team>) {
+        let mut team_list: Vec<&mut Team> = teams.values_mut().collect();
 
-        Self::assign_rank(&mut team_list, |t| t.overall_opr, |t, r| t.overall_rank = Some(r), true);
-        Self::assign_rank(&mut team_list, |t| t.auto_opr, |t, r| t.auto_rank = Some(r), true);
-        Self::assign_rank(&mut team_list, |t| t.tele_opr, |t, r| t.tele_rank = Some(r), true);
-        Self::assign_rank(&mut team_list, |t| t.endgame_opr, |t, r| t.endgame_rank = Some(r), true);
-        Self::assign_rank(&mut team_list, |t| t.penalties, |t, r| t.penalty_rank = Some(r), false);
+        // Higher is better everywhere except penalties.
+        Self::assign_rank(
+            &mut team_list,
+            |t| t.overall,
+            |t, r| t.overall_rank = Some(r),
+            true,
+        );
+        Self::assign_rank(
+            &mut team_list,
+            |t| t.auto,
+            |t, r| t.auto_rank = Some(r),
+            true,
+        );
+        Self::assign_rank(
+            &mut team_list,
+            |t| t.teleop,
+            |t, r| t.tele_rank = Some(r),
+            true,
+        );
+        Self::assign_rank(
+            &mut team_list,
+            |t| t.endgame,
+            |t, r| t.endgame_rank = Some(r),
+            true,
+        );
+        Self::assign_rank(
+            &mut team_list,
+            |t| t.penalties,
+            |t, r| t.penalty_rank = Some(r),
+            false,
+        );
     }
 
-    fn assign_rank<F, S>(teams: &mut [&mut TeamOpr], score_fn: F, set_rank: S, reverse: bool)
+    fn assign_rank<F, S>(teams: &mut [&mut Team], score_fn: F, set_rank: S, reverse: bool)
     where
-        F: Fn(&TeamOpr) -> f64,
-        S: Fn(&mut TeamOpr, i32),
+        F: Fn(&Team) -> f64,
+        S: Fn(&mut Team, u32),
     {
         teams.sort_by(|a, b| {
-            let sa = score_fn(a);
-            let sb = score_fn(b);
+            let (sa, sb) = (score_fn(a), score_fn(b));
             if reverse {
-                sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                sb.total_cmp(&sa)
             } else {
-                sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                sa.total_cmp(&sb)
             }
         });
 
         let mut current_rank = 1;
         for i in 0..teams.len() {
             if i > 0 && (score_fn(teams[i]) - score_fn(teams[i - 1])).abs() > 1e-6 {
-                current_rank = (i + 1) as i32;
+                current_rank = (i + 1) as u32;
             }
             set_rank(teams[i], current_rank);
         }
     }
 
-    pub async fn upsert_to_database(&self, teams: &HashMap<i32, TeamOpr>) -> Result<()> {
+    pub async fn upsert_to_database(&self, teams: &HashMap<u32, Team>) -> Result<()> {
         let now = Utc::now();
         let timestamp = now.format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
 
-        let rows: Vec<Value> = teams
+        let rows: Vec<Team> = teams
             .values()
-            .map(|team| {
-                json!({
-                    "teamNumber": team.team_number,
-                    "teamName": team.team_name,
-                    "sponsors": team.sponsors,
-                    "location": team.location,
-                    "autoOPR": team.auto_opr,
-                    "teleOPR": team.tele_opr,
-                    "endgameOPR": team.endgame_opr,
-                    "overallOPR": team.overall_opr,
-                    "penalties": team.penalties,
-                    "autoRank": team.auto_rank,
-                    "teleRank": team.tele_rank,
-                    "endgameRank": team.endgame_rank,
-                    "overallRank": team.overall_rank,
-                    "penaltyRank": team.penalty_rank,
-                    "profileUpdate": timestamp,
-                    "founded": team.founded,
-                    "website": team.website,
-                    "eventsAttended": team.events_attended,
-                })
+            .map(|team| Team {
+                profile_update: Some(timestamp.clone()),
+                ..team.clone()
             })
             .collect();
 
-        if !rows.is_empty() {
-            let body = serde_json::to_string(&rows)?;
-            self.supabase_client
-                .from(&self.config.season_table)
-                .upsert(body)
-                .execute()
-                .await
-                .context("failed to upsert teams")?;
-
-            tracing::info!("✅ Upserted {} teams to database", rows.len());
+        let count = rows.len();
+        self.client.upsert(&self.table, &rows, None).await?;
+        if count > 0 {
+            tracing::info!("✅ Upserted {count} teams to database");
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn team(number: u32, auto: f64, penalties: f64) -> Team {
+        Team {
+            auto,
+            penalties,
+            ..Team::new(number, format!("Team {number}"))
+        }
+    }
+
+    fn ranked(teams: Vec<Team>) -> HashMap<u32, Team> {
+        let mut map: HashMap<u32, Team> = teams.into_iter().map(|t| (t.number, t)).collect();
+        Processor::rank(&mut map);
+        map
+    }
+
+    #[test]
+    fn higher_auto_ranks_first() {
+        let map = ranked(vec![
+            team(1, 10.0, 0.0),
+            team(2, 30.0, 0.0),
+            team(3, 20.0, 0.0),
+        ]);
+
+        assert_eq!(map[&2].auto_rank, Some(1));
+        assert_eq!(map[&3].auto_rank, Some(2));
+        assert_eq!(map[&1].auto_rank, Some(3));
+    }
+
+    #[test]
+    fn fewer_penalties_ranks_first() {
+        let map = ranked(vec![
+            team(1, 0.0, 50.0),
+            team(2, 0.0, 10.0),
+            team(3, 0.0, 30.0),
+        ]);
+
+        assert_eq!(map[&2].penalty_rank, Some(1));
+        assert_eq!(map[&3].penalty_rank, Some(2));
+        assert_eq!(map[&1].penalty_rank, Some(3));
+    }
+
+    #[test]
+    fn negative_scores_rank_below_positive() {
+        let map = ranked(vec![
+            team(1, -5.0, 0.0),
+            team(2, 0.0, 0.0),
+            team(3, 5.0, 0.0),
+        ]);
+
+        assert_eq!(map[&3].auto_rank, Some(1));
+        assert_eq!(map[&2].auto_rank, Some(2));
+        assert_eq!(map[&1].auto_rank, Some(3));
+    }
+
+    #[test]
+    fn equal_scores_share_a_rank() {
+        let map = ranked(vec![
+            team(1, 10.0, 0.0),
+            team(2, 10.0, 0.0),
+            team(3, 5.0, 0.0),
+        ]);
+
+        assert_eq!(map[&1].auto_rank, Some(1));
+        assert_eq!(map[&2].auto_rank, Some(1));
+        assert_eq!(map[&3].auto_rank, Some(3));
+    }
+
+    #[test]
+    fn fractional_differences_do_not_collapse_into_ties() {
+        let map = ranked(vec![
+            team(1, 6.3485, 0.0),
+            team(2, 6.9999, 0.0),
+            team(3, 6.1, 0.0),
+        ]);
+
+        assert_eq!(map[&2].auto_rank, Some(1));
+        assert_eq!(map[&1].auto_rank, Some(2));
+        assert_eq!(map[&3].auto_rank, Some(3));
+    }
+
+    #[test]
+    fn overall_ranks_on_auto_plus_teleop() {
+        let mut a = team(1, 10.0, 0.0);
+        a.teleop = 5.0;
+        a.recompute_overall();
+        let mut b = team(2, 1.0, 0.0);
+        b.teleop = 50.0;
+        b.recompute_overall();
+
+        let map = ranked(vec![a, b]);
+        assert_eq!(map[&2].overall_rank, Some(1));
+        assert_eq!(map[&1].overall_rank, Some(2));
+    }
+
+    #[test]
+    fn every_metric_gets_ranked() {
+        let map = ranked(vec![team(1, 10.0, 1.0), team(2, 20.0, 2.0)]);
+        let t = &map[&1];
+
+        assert!(t.auto_rank.is_some());
+        assert!(t.tele_rank.is_some());
+        assert!(t.endgame_rank.is_some());
+        assert!(t.penalty_rank.is_some());
+        assert!(t.overall_rank.is_some());
     }
 }

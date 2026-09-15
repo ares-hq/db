@@ -8,14 +8,20 @@ anyhow = "1.0"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
-faer = "0.20"
 futures = "0.3"
 ndarray = "0.17.2"
-postgrest = "1.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-cache = { git = "https://github.com/ares-hq/cache.git", branch = "main" }
+model = { git = "https://github.com/ares-hq/model.git", branch = "main", features = ["supabase"] }
+md-5 = "0.11.0"
+nalgebra = "0.35.0"
+
+# Build against the sibling `model` submodule checkout rather than the published
+# git branch, so changes to both crates land together. Drop this once the
+# matching `model` commit is pushed to main.
+[patch."https://github.com/ares-hq/model.git"]
+model = { path = "../model" }

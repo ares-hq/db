@@ -8,53 +8,62 @@ pub trait ScoreAdapter: Send + Sync {
 pub struct DefaultModernAdapter;
 pub struct LegacyPenaltyAdapter;
 pub struct Decode2025Adapter;
+pub struct Biobuzz2026Adapter;
+
+/// Alliance `1` is red, `0` is blue.
+fn field(score: &Value, alliance: usize, key: &str) -> i32 {
+    score["alliances"][alliance][key].as_i64().unwrap_or(0) as i32
+}
+
+fn both(score: &Value, key: &str) -> (i32, i32) {
+    (field(score, 1, key), field(score, 0, key))
+}
 
 impl ScoreAdapter for DefaultModernAdapter {
     fn endgame_points(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["teleopParkPoints"].as_i64().unwrap_or(0)
-            + score["alliances"][1]["teleopAscentPoints"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["teleopParkPoints"].as_i64().unwrap_or(0)
-            + score["alliances"][0]["teleopAscentPoints"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        let sum = |a| field(score, a, "teleopParkPoints") + field(score, a, "teleopAscentPoints");
+        (sum(1), sum(0))
     }
 
     fn penalties(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["foulPointsCommitted"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["foulPointsCommitted"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        both(score, "foulPointsCommitted")
     }
 }
 
 impl ScoreAdapter for LegacyPenaltyAdapter {
     fn endgame_points(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["endgamePoints"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["endgamePoints"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        both(score, "endgamePoints")
     }
 
     fn penalties(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["penaltyPoints"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["penaltyPoints"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        both(score, "penaltyPoints")
     }
 }
 
 impl ScoreAdapter for Decode2025Adapter {
     fn endgame_points(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["teleopBasePoints"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["teleopBasePoints"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        both(score, "teleopBasePoints")
     }
 
     fn penalties(&self, score: &Value) -> (i32, i32) {
-        let red = score["alliances"][1]["foulPointsCommitted"].as_i64().unwrap_or(0);
-        let blue = score["alliances"][0]["foulPointsCommitted"].as_i64().unwrap_or(0);
-        (red as i32, blue as i32)
+        both(score, "foulPointsCommitted")
+    }
+}
+
+// TODO(BIOBUZZ): endgame key is a guess; confirm against the 2026 score schema.
+impl ScoreAdapter for Biobuzz2026Adapter {
+    fn endgame_points(&self, score: &Value) -> (i32, i32) {
+        both(score, "teleopBasePoints")
+    }
+
+    fn penalties(&self, score: &Value) -> (i32, i32) {
+        both(score, "foulPointsCommitted")
     }
 }
 
 pub fn adapter_for_year(year: i32) -> Box<dyn ScoreAdapter> {
     match year {
+        2026 => Box::new(Biobuzz2026Adapter),
         2025 => Box::new(Decode2025Adapter),
         2019..=2023 => Box::new(LegacyPenaltyAdapter),
         _ => Box::new(DefaultModernAdapter),
