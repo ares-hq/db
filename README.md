@@ -39,11 +39,12 @@ cargo run --release --bin db -- --year 2025 --all-events
 
 ## Deploy
 
-A batch job, so it runs one-shot on a timer rather than as a supervised loop. Setup in
+A batch job, so it runs one-shot on a timer rather than as a supervised loop: recent
+events every 15 minutes, the whole season nightly. Setup in
 [`deploy/README.md`](../deploy/README.md).
 
 ```bash
-docker compose run --rm db --year 2025 --all-events
+sudo systemctl start ares-db.service
 ```
 
 ## Tests
