@@ -3,9 +3,12 @@ use model::prelude::{Supabase, Team};
 
 use crate::matches::MatchRow;
 use chrono::Utc;
+use model::tables;
 use std::collections::HashMap;
 
 use crate::config::Config;
+
+const TIE_TOLERANCE: f64 = 1e-6;
 
 pub struct Processor {
     client: Supabase,
@@ -17,12 +20,11 @@ impl Processor {
     pub fn new(config: Config, year: i32) -> Self {
         Self {
             client: Supabase::new(&config.supabase_url, config.supabase_key),
-            table: format!("season_{year}"),
-            match_table: format!("matches_{year}"),
+            table: tables::season(year),
+            match_table: tables::matches(year),
         }
     }
 
-    /// Upserts raw match results, keyed on `matchcode`.
     pub async fn upsert_matches(&self, matches: &[MatchRow]) -> Result<()> {
         let count = matches.len();
         self.client
@@ -50,14 +52,11 @@ impl Processor {
             team.founded = team.founded.or(row.founded);
             team.website = team.website.take().or_else(|| row.website.clone());
 
-            // The stored row came from a stronger event; keep it.
             if !force_update && team.overall <= row.overall {
                 *team = Team {
                     events_attended: std::mem::take(&mut team.events_attended),
                     founded: team.founded,
                     website: team.website.take(),
-                    last_match: team.last_match,
-                    last_checked: team.last_checked,
                     ..row
                 };
             }
@@ -69,7 +68,6 @@ impl Processor {
     pub fn rank(teams: &mut HashMap<u32, Team>) {
         let mut team_list: Vec<&mut Team> = teams.values_mut().collect();
 
-        // Higher is better everywhere except penalties.
         Self::assign_rank(
             &mut team_list,
             |t| t.overall,
@@ -102,45 +100,46 @@ impl Processor {
         );
     }
 
+    /// Standard competition ranking: 1, 1, 3 — never 1, 1, 2.
     fn assign_rank<F, S>(teams: &mut [&mut Team], score_fn: F, set_rank: S, reverse: bool)
     where
         F: Fn(&Team) -> f64,
         S: Fn(&mut Team, u32),
     {
-        teams.sort_by(|a, b| {
-            let (sa, sb) = (score_fn(a), score_fn(b));
+        let mut ordered: Vec<(usize, f64)> = teams
+            .iter()
+            .map(|team| score_fn(team))
+            .enumerate()
+            .collect();
+        ordered.sort_by(|(_, a), (_, b)| {
             if reverse {
-                sb.total_cmp(&sa)
+                b.total_cmp(a)
             } else {
-                sa.total_cmp(&sb)
+                a.total_cmp(b)
             }
         });
 
-        let mut current_rank = 1;
-        for i in 0..teams.len() {
-            if i > 0 && (score_fn(teams[i]) - score_fn(teams[i - 1])).abs() > 1e-6 {
-                current_rank = (i + 1) as u32;
+        let mut rank = 1;
+        let mut previous = None;
+        for (position, (index, score)) in ordered.into_iter().enumerate() {
+            if previous.is_some_and(|p: f64| (score - p).abs() > TIE_TOLERANCE) {
+                rank = position as u32 + 1;
             }
-            set_rank(teams[i], current_rank);
+            set_rank(teams[index], rank);
+            previous = Some(score);
         }
     }
 
-    pub async fn upsert_to_database(&self, teams: &HashMap<u32, Team>) -> Result<()> {
-        let now = Utc::now();
-        let timestamp = now.format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+    pub async fn upsert_to_database(&self, teams: &mut HashMap<u32, Team>) -> Result<()> {
+        let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+        for team in teams.values_mut() {
+            team.profile_update = Some(timestamp.clone());
+        }
 
-        let rows: Vec<Team> = teams
-            .values()
-            .map(|team| Team {
-                profile_update: Some(timestamp.clone()),
-                ..team.clone()
-            })
-            .collect();
-
-        let count = rows.len();
+        let rows: Vec<&Team> = teams.values().collect();
         self.client.upsert(&self.table, &rows, None).await?;
-        if count > 0 {
-            tracing::info!("✅ Upserted {count} teams to database");
+        if !rows.is_empty() {
+            tracing::info!("✅ Upserted {} teams to database", rows.len());
         }
 
         Ok(())
@@ -242,6 +241,19 @@ mod tests {
         let map = ranked(vec![a, b]);
         assert_eq!(map[&2].overall_rank, Some(1));
         assert_eq!(map[&1].overall_rank, Some(2));
+    }
+
+    #[test]
+    fn a_tie_is_followed_by_the_next_ordinal_rank() {
+        let map = ranked(vec![
+            team(1, 10.0, 0.0),
+            team(2, 10.0, 0.0),
+            team(3, 10.0, 0.0),
+            team(4, 1.0, 0.0),
+        ]);
+
+        assert_eq!(map[&1].auto_rank, Some(1));
+        assert_eq!(map[&4].auto_rank, Some(4));
     }
 
     #[test]

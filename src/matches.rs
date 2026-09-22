@@ -1,14 +1,9 @@
-//! Raw per-alliance match results for the `matches_<year>` tables — the finals
-//! as reported, one row per alliance. Distinct from [`model::prelude::Match`]
-//! (the OPR view, which re-weights scores). Keyed by `matchcode` on match
-//! identity, not score, so a re-scored match updates in place.
-
+use crate::api_types::MatchInfo;
 use crate::level::Level;
+use crate::stations::alliance_teams;
 use md5::{Digest, Md5};
 use serde::Serialize;
-use serde_json::Value;
 
-/// One alliance's result in one match, as a `matches_<year>` row.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MatchRow {
     pub matchcode: String,
@@ -26,69 +21,45 @@ pub struct MatchRow {
 }
 
 impl MatchRow {
-    /// `matchcode` = `md5("{event}-{level}-{number}-{series}-{color}")` — identity, no score.
+    /// `matchcode` = `md5("{event}-{level}-{number}-{series}-{color}")`.
     fn hash(event: &str, level: Level, number: i64, series: i64, color: &str) -> String {
         let mut h = Md5::new();
         h.update(format!("{event}-{level}-{number}-{series}-{color}").as_bytes());
         h.finalize().iter().map(|b| format!("{b:02x}")).collect()
     }
 
-    /// `color`'s two teams in station order, `0`-padded.
-    fn pick_two(teams: &[Value], color: &str) -> (i64, i64) {
-        let mut picked = teams
-            .iter()
-            .filter(|t| {
-                t["station"]
-                    .as_str()
-                    .is_some_and(|s| s.to_ascii_lowercase().starts_with(color))
-            })
-            .filter_map(|t| t["teamNumber"].as_i64())
-            .take(2);
-        (picked.next().unwrap_or(0), picked.next().unwrap_or(0))
-    }
-
-    /// One row per alliance that fielded a team (byes dropped); every level kept.
-    pub fn from_match(event: &str, m: &Value) -> Vec<MatchRow> {
-        let Some(teams) = m["teams"].as_array() else {
+    /// Byes dropped; every level kept.
+    pub fn rows_for(event: &str, m: &MatchInfo) -> Vec<MatchRow> {
+        // Unplayed matches have no start time.
+        let Some(date) = m.actual_start_time.clone() else {
             return vec![];
         };
-        // Unplayed matches have no start time; skip so `date` (timestamptz) stays valid.
-        let Some(date) = m["actualStartTime"].as_str().map(str::to_owned) else {
-            return vec![];
-        };
-        let int = |key: &str| m[key].as_i64().unwrap_or(0);
 
-        let (red_final, blue_final) = (int("scoreRedFinal"), int("scoreBlueFinal"));
-        let match_type = Level::from_api(m["tournamentLevel"].as_str().unwrap_or(""));
-        let number = int("matchNumber");
-        let series = int("series");
-
-        let (r1, r2) = Self::pick_two(teams, "red");
-        let (b1, b2) = Self::pick_two(teams, "blue");
+        let ([r1, r2], [b1, b2]) = alliance_teams(&m.teams);
 
         let red = MatchRow {
-            matchcode: Self::hash(event, match_type, number, series, "red"),
+            matchcode: Self::hash(event, m.tournament_level, m.match_number, m.series, "red"),
             alliance: "red".to_owned(),
-            team_1: r1,
-            team_2: r2,
-            total_points: red_final,
-            tele: red_final - int("scoreRedAuto") - int("scoreBlueFoul"),
-            penalty: int("scoreRedFoul"),
-            win: red_final > blue_final,
+            team_1: r1 as i64,
+            team_2: r2 as i64,
+            total_points: m.score_red_final,
+            tele: m.score_red_final - m.score_red_auto - m.score_blue_foul,
+            penalty: m.score_red_foul,
+            win: m.score_red_final > m.score_blue_final,
             date: date.clone(),
-            match_type,
+            match_type: m.tournament_level,
         };
         let blue = MatchRow {
-            matchcode: Self::hash(event, match_type, number, series, "blue"),
+            matchcode: Self::hash(event, m.tournament_level, m.match_number, m.series, "blue"),
             alliance: "blue".to_owned(),
-            team_1: b1,
-            team_2: b2,
-            total_points: blue_final,
-            tele: blue_final - int("scoreBlueAuto") - int("scoreRedFoul"),
-            penalty: int("scoreBlueFoul"),
-            win: blue_final > red_final,
+            team_1: b1 as i64,
+            team_2: b2 as i64,
+            total_points: m.score_blue_final,
+            tele: m.score_blue_final - m.score_blue_auto - m.score_red_foul,
+            penalty: m.score_blue_foul,
+            win: m.score_blue_final > m.score_red_final,
             date,
-            match_type,
+            match_type: m.tournament_level,
         };
         [red, blue]
             .into_iter()
@@ -102,7 +73,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn match_json() -> Value {
+    fn parse(v: serde_json::Value) -> MatchInfo {
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn match_json() -> serde_json::Value {
         json!({
             "actualStartTime": "2025-11-16T13:39:29.611+00:00",
             "tournamentLevel": "QUALIFICATION",
@@ -128,14 +103,12 @@ mod tests {
 
     #[test]
     fn each_alliance_of_a_match_gets_its_own_code() {
-        let rows = MatchRow::from_match("E", &match_json());
+        let rows = MatchRow::rows_for("E", &parse(match_json()));
         assert_ne!(rows[0].matchcode, rows[1].matchcode);
     }
 
     #[test]
     fn distinct_matches_get_distinct_codes() {
-        // Same alliance pairing, different playoff matches (Finals 1 vs 2)
-        // must not collapse onto one row.
         let base = |n| {
             json!({
                 "actualStartTime": "2025-11-16T13:39:29.611+00:00",
@@ -149,14 +122,14 @@ mod tests {
                 ]
             })
         };
-        let m1 = MatchRow::from_match("E", &base(1));
-        let m2 = MatchRow::from_match("E", &base(2));
+        let m1 = MatchRow::rows_for("E", &parse(base(1)));
+        let m2 = MatchRow::rows_for("E", &parse(base(2)));
         assert_ne!(m1[0].matchcode, m2[0].matchcode);
     }
 
     #[test]
     fn builds_both_alliances_from_one_match() {
-        let [red, blue]: [MatchRow; 2] = MatchRow::from_match("USTXCMP", &match_json())
+        let [red, blue]: [MatchRow; 2] = MatchRow::rows_for("USTXCMP", &parse(match_json()))
             .try_into()
             .unwrap();
 
@@ -164,9 +137,8 @@ mod tests {
         assert_eq!((blue.team_1, blue.team_2), (11505, 30070));
         assert_eq!(red.total_points, 145);
         assert_eq!(blue.total_points, 137);
-        // tele = final - auto - opponent foul.
         assert_eq!(red.tele, 145 - 20 - 50);
-        assert_eq!(blue.tele, 137 - 30 - 0);
+        assert_eq!(blue.tele, 137 - 30);
         assert_eq!(red.penalty, 0);
         assert_eq!(blue.penalty, 50);
         assert!(red.win);
@@ -180,7 +152,7 @@ mod tests {
             "scoreRedFinal": 10, "scoreBlueFinal": 5,
             "teams": [{ "teamNumber": 1, "station": "Red1" }]
         });
-        let rows = MatchRow::from_match("E", &m);
+        let rows = MatchRow::rows_for("E", &parse(m));
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].team_1, rows[0].team_2), (1, 0));
         assert_eq!(rows[0].alliance, "red");
@@ -188,7 +160,6 @@ mod tests {
 
     #[test]
     fn a_bye_alliance_produces_no_row() {
-        // Blue has no teams (a playoff bye): its all-zero row must not be written.
         let m = json!({
             "actualStartTime": "2025-11-16T13:39:29.611+00:00",
             "scoreRedFinal": 10, "scoreBlueFinal": 0,
@@ -197,7 +168,7 @@ mod tests {
                 { "teamNumber": 2, "station": "Red2" },
             ]
         });
-        let rows = MatchRow::from_match("E", &m);
+        let rows = MatchRow::rows_for("E", &parse(m));
         assert_eq!(rows.len(), 1);
         assert!(rows.iter().all(|r| r.team_1 != 0 || r.team_2 != 0));
     }
@@ -209,21 +180,48 @@ mod tests {
             "teams": [{ "teamNumber": 1, "station": "Red1" }]
             // no actualStartTime, no scores
         });
-        assert!(MatchRow::from_match("E", &m).is_empty());
+        assert!(MatchRow::rows_for("E", &parse(m)).is_empty());
+    }
+
+    #[test]
+    fn a_lone_second_station_keeps_its_slot() {
+        let m = json!({
+            "actualStartTime": "2025-11-16T13:39:29.611+00:00",
+            "scoreRedFinal": 10, "scoreBlueFinal": 5,
+            "teams": [{ "teamNumber": 7, "station": "Red2" }]
+        });
+        let rows = MatchRow::rows_for("E", &parse(m));
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].team_1, rows[0].team_2), (0, 7));
+    }
+
+    #[test]
+    fn an_off_field_team_is_not_recorded() {
+        let m = json!({
+            "actualStartTime": "2025-11-16T13:39:29.611+00:00",
+            "scoreRedFinal": 10, "scoreBlueFinal": 5,
+            "teams": [
+                { "teamNumber": 1, "station": "Red1" },
+                { "teamNumber": 2, "station": "Red2", "onField": false },
+            ]
+        });
+        let rows = MatchRow::rows_for("E", &parse(m));
+        assert_eq!((rows[0].team_1, rows[0].team_2), (1, 0));
     }
 
     #[test]
     fn a_match_without_a_team_list_is_skipped() {
-        assert!(MatchRow::from_match("E", &json!({ "scoreRedFinal": 10 })).is_empty());
+        assert!(MatchRow::rows_for("E", &parse(json!({ "scoreRedFinal": 10 }))).is_empty());
     }
 
     #[test]
     fn rescoring_keeps_the_matchcode() {
-        // A revised score must update the existing row, not insert a new one.
         let mut m = match_json();
-        let before = MatchRow::from_match("E", &m)[0].matchcode.clone();
+        let before = MatchRow::rows_for("E", &parse(m.clone()))[0]
+            .matchcode
+            .clone();
         m["scoreRedFinal"] = json!(146);
-        let after = MatchRow::from_match("E", &m)[0].matchcode.clone();
+        let after = MatchRow::rows_for("E", &parse(m))[0].matchcode.clone();
         assert_eq!(before, after);
     }
 }

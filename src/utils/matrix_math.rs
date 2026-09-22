@@ -2,10 +2,7 @@ use anyhow::{Result, anyhow};
 use nalgebra::{DMatrix, DVector};
 use ndarray::{Array1, Array2};
 
-/// Least-squares solve of `a x = b` via one SVD reused across every `b`.
-///
-/// Rank-deficient `a` (teams that never separate across alliances) has no
-/// identifiable solution, so it is rejected, not solved to arbitrary values.
+/// Least-squares `a x = b`. Rejects rank-deficient and underdetermined systems.
 pub fn svd(a: &Array2<f64>, bs: &[&Array1<f64>]) -> Result<Vec<Array1<f64>>> {
     let (rows, cols) = a.dim();
     if rows == 0 || cols == 0 {
@@ -26,7 +23,6 @@ pub fn svd(a: &Array2<f64>, bs: &[&Array1<f64>]) -> Result<Vec<Array1<f64>>> {
     let matrix = DMatrix::from_fn(rows, cols, |r, c| a[[r, c]]);
     let svd = matrix.svd(true, true);
 
-    // Fewer than `cols` significant singular values = fit not identifiable.
     let s_max = svd.singular_values.iter().cloned().fold(0.0_f64, f64::max);
     let cutoff = s_max * 1e-9;
     if svd.singular_values.iter().filter(|&&s| s > cutoff).count() < cols {
@@ -50,7 +46,6 @@ pub fn svd(a: &Array2<f64>, bs: &[&Array1<f64>]) -> Result<Vec<Array1<f64>>> {
 mod tests {
     use super::*;
 
-    /// Full rank: each of 6 teams alone, then 6 pairings.
     fn design() -> Array2<f64> {
         let pairs = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
         Array2::from_shape_fn((12, 6), |(r, c)| {
@@ -111,7 +106,6 @@ mod tests {
 
     #[test]
     fn rejects_rank_deficient_instead_of_returning_garbage() {
-        // Two teams always paired: identical columns, not separable — must error.
         let a = Array2::from_shape_fn((6, 2), |(_, _)| 1.0);
         let b = Array1::from_elem(6, 50.0);
         let err = svd(&a, &[&b]).unwrap_err().to_string();

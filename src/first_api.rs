@@ -1,16 +1,19 @@
-use crate::level::Level;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use futures::future::join_all;
 use model::prelude::{Alliance, Event, Match, Team};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use tokio::sync::Semaphore;
 
 use crate::api_client::ApiClient;
 use crate::api_params::ApiParams;
+use crate::api_types::{
+    EventsResponse, MatchInfo, MatchScore, MatchesResponse, ScoresResponse, TeamInfo, TeamsResponse,
+};
+use crate::level::Level;
 use crate::matches::MatchRow;
 use crate::opr::{self, Opr};
+use crate::stations::alliance_teams;
 use crate::year_adapters::adapter_for_year;
 
 pub struct FirstApi {
@@ -27,18 +30,13 @@ impl FirstApi {
         year: i32,
         all_events: bool,
     ) -> Result<(HashMap<u32, Team>, Vec<MatchRow>)> {
-        let events = if all_events {
-            self.get_all_events(year).await?
-        } else {
-            self.get_future_events(year).await?
-        };
+        let events = self.get_events(year, all_events).await?;
 
         tracing::info!("Processing {} events for season {}", events.len(), year);
 
         let mut roster = self.fetch_team_roster(year).await?;
         tracing::info!(teams = roster.len(), "Fetched season team roster");
 
-        // Solve independently, merge later in one owner — no lock needed.
         let sem = Semaphore::new(16);
         let tasks: Vec<_> = events
             .iter()
@@ -79,7 +77,6 @@ impl FirstApi {
         Ok((merge_events(&roster, &solved), matches))
     }
 
-    /// Teams that played but missed the roster; rare, so sequential. Returns count added.
     async fn fetch_missing_teams(
         &self,
         year: i32,
@@ -96,7 +93,7 @@ impl FirstApi {
 
         let mut added = 0;
         for number in missing {
-            match Self::fetch_team_info(&self.client, number as i32, year).await {
+            match Self::fetch_team_info(&self.client, number, year).await {
                 Ok(team) => {
                     roster.insert(number, team);
                     added += 1;
@@ -109,10 +106,10 @@ impl FirstApi {
         added
     }
 
-    /// Whole season roster by team number; paged 500 at a time, not per-team.
+    /// Paged 500 at a time.
     async fn fetch_team_roster(&self, year: i32) -> Result<HashMap<u32, Team>> {
         let first = self.fetch_team_page(year, 1).await?;
-        let page_total = first["pageTotal"].as_i64().unwrap_or(1).max(1);
+        let page_total = first.page_total.unwrap_or(1).max(1);
 
         let mut pages = vec![first];
         let sem = Semaphore::new(8);
@@ -134,54 +131,31 @@ impl FirstApi {
 
         Ok(pages
             .iter()
-            .filter_map(|p| p["teams"].as_array())
-            .flatten()
-            .filter_map(team_from_json)
+            .flat_map(|p| p.teams.iter())
+            .filter_map(team_from_info)
             .map(|team| (team.number, team))
             .collect())
     }
 
-    async fn fetch_team_page(&self, year: i32, page: i64) -> Result<Value> {
+    async fn fetch_team_page(&self, year: i32, page: i64) -> Result<TeamsResponse> {
         let params = ApiParams::new(vec![year.to_string(), "teams".to_owned()])
             .with_query("page", page.to_string());
-        self.client.get_json(&params).await
+        self.client.get(&params).await
     }
 
-    async fn get_all_events(&self, year: i32) -> Result<Vec<String>> {
+    async fn get_events(&self, year: i32, all_events: bool) -> Result<Vec<String>> {
         let params = ApiParams::new(vec![year.to_string(), "events".to_owned()]);
-        let resp = self.client.get_json(&params).await?;
-        let events = resp["events"]
-            .as_array()
-            .context("events not array")?
-            .iter()
-            .filter_map(|e| e["code"].as_str().map(|s| s.to_owned()))
-            .collect();
-        Ok(events)
+        let resp: EventsResponse = self.client.get(&params).await?;
+
+        let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(7);
+        Ok(resp
+            .events
+            .into_iter()
+            .filter(|e| all_events || started_on_or_after(e.date_start.as_deref(), cutoff))
+            .filter_map(|e| e.code)
+            .collect())
     }
 
-    async fn get_future_events(&self, year: i32) -> Result<Vec<String>> {
-        let params = ApiParams::new(vec![year.to_string(), "events".to_owned()]);
-        let resp = self.client.get_json(&params).await?;
-        let today = chrono::Utc::now().date_naive();
-        let cutoff = today - chrono::Duration::days(7);
-
-        let events = resp["events"]
-            .as_array()
-            .context("events not array")?
-            .iter()
-            .filter(|e| {
-                e["dateStart"]
-                    .as_str()
-                    .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                    .map(|date| date >= cutoff)
-                    .unwrap_or(false)
-            })
-            .filter_map(|e| e["code"].as_str().map(|s| s.to_owned()))
-            .collect();
-        Ok(events)
-    }
-
-    /// One event's matches and its OPR.
     async fn solve_event(
         client: &ApiClient,
         event_code: &str,
@@ -192,48 +166,45 @@ impl FirstApi {
             Self::fetch_event_scores(client, event_code, year),
         )?;
 
-        // Scores cover only quals; match number joins them, never array position.
-        let scores_by_number: HashMap<i64, &Value> = scores_raw
+        let scores_by_number: HashMap<i64, &MatchScore> = scores_raw
             .iter()
-            .filter_map(|s| s["matchNumber"].as_i64().map(|n| (n, s)))
+            .filter_map(|s| s.match_number.map(|n| (n, s)))
             .collect();
 
         let adapter = adapter_for_year(year);
         let mut event = Event::new(event_code);
 
-        for match_obj in matches_raw.iter().filter(|m| {
-            Level::from_api(m["tournamentLevel"].as_str().unwrap_or("")) == Level::Qualification
-        }) {
-            let Some(score_obj) = match_obj["matchNumber"]
-                .as_i64()
-                .and_then(|n| scores_by_number.get(&n))
-            else {
+        for match_info in matches_raw
+            .iter()
+            .filter(|m| m.tournament_level == Level::Qualification)
+        {
+            let Some(score) = scores_by_number.get(&match_info.match_number) else {
                 continue;
             };
 
-            let (red_endgame, blue_endgame) = adapter.endgame_points(score_obj);
-            let (red_penalty, blue_penalty) = adapter.penalties(score_obj);
+            let (red_endgame, blue_endgame) = adapter.endgame_points(score);
+            let (red_penalty, blue_penalty) = adapter.penalties(score);
+            let (red_teams, blue_teams) = alliance_teams(&match_info.teams);
 
-            let (red_teams, blue_teams) = alliance_teams(match_obj);
-            let points = |key: &str| match_obj[key].as_f64().unwrap_or(0.0);
-
-            // Teleop = final - auto - opponent fouls.
+            // The final score carries the opponent's fouls; its teleop share carries endgame.
             event.add_match(Match::new(
                 Alliance {
                     teams: red_teams,
-                    auto: points("scoreRedAuto"),
-                    teleop: points("scoreRedFinal")
-                        - points("scoreRedAuto")
-                        - points("scoreBlueFoul"),
+                    auto: match_info.score_red_auto as f64,
+                    teleop: (match_info.score_red_final
+                        - match_info.score_red_auto
+                        - match_info.score_blue_foul
+                        - red_endgame as i64) as f64,
                     endgame: red_endgame as f64,
                     penalties: red_penalty as f64,
                 },
                 Alliance {
                     teams: blue_teams,
-                    auto: points("scoreBlueAuto"),
-                    teleop: points("scoreBlueFinal")
-                        - points("scoreBlueAuto")
-                        - points("scoreRedFoul"),
+                    auto: match_info.score_blue_auto as f64,
+                    teleop: (match_info.score_blue_final
+                        - match_info.score_blue_auto
+                        - match_info.score_red_foul
+                        - blue_endgame as i64) as f64,
                     endgame: blue_endgame as f64,
                     penalties: blue_penalty as f64,
                 },
@@ -244,10 +215,9 @@ impl FirstApi {
             return Err(anyhow!("no scored qualification matches"));
         }
 
-        // Match log keeps every level, not just quals.
         let matches = matches_raw
             .iter()
-            .flat_map(|m| MatchRow::from_match(event_code, m))
+            .flat_map(|m| MatchRow::rows_for(event_code, m))
             .collect();
 
         Ok((opr::solve(&event)?, matches))
@@ -257,41 +227,48 @@ impl FirstApi {
         client: &ApiClient,
         event_code: &str,
         year: i32,
-    ) -> Result<Vec<Value>> {
+    ) -> Result<Vec<MatchInfo>> {
         let params = ApiParams::new(vec![
             year.to_string(),
             "matches".to_owned(),
             event_code.to_owned(),
         ]);
-        let resp = client.get_json(&params).await?;
-        Ok(resp["matches"].as_array().cloned().unwrap_or_default())
+        let resp: MatchesResponse = client.get(&params).await?;
+        Ok(resp.matches)
     }
 
     async fn fetch_event_scores(
         client: &ApiClient,
         event_code: &str,
         year: i32,
-    ) -> Result<Vec<Value>> {
+    ) -> Result<Vec<MatchScore>> {
         let params = ApiParams::new(vec![
             year.to_string(),
             "scores".to_owned(),
             event_code.to_owned(),
             "qual".to_owned(),
         ]);
-        let resp = client.get_json(&params).await?;
-        Ok(resp["matchScores"].as_array().cloned().unwrap_or_default())
+        let resp: ScoresResponse = client.get(&params).await?;
+        Ok(resp.match_scores)
     }
 
-    async fn fetch_team_info(client: &ApiClient, team_number: i32, year: i32) -> Result<Team> {
+    async fn fetch_team_info(client: &ApiClient, team_number: u32, year: i32) -> Result<Team> {
         let params = ApiParams::new(vec![year.to_string(), "teams".to_owned()])
             .with_query("teamNumber", team_number.to_string());
-        let resp = client.get_json(&params).await?;
-        team_from_json(&resp["teams"][0])
-            .with_context(|| format!("team {team_number} not found for season {year}"))
+        let resp: TeamsResponse = client.get(&params).await?;
+        resp.teams
+            .first()
+            .and_then(team_from_info)
+            .ok_or_else(|| anyhow!("team {team_number} not found for season {year}"))
     }
 }
 
-/// One record per team: figures from its strongest event by OPR, all events recorded.
+fn started_on_or_after(date_start: Option<&str>, cutoff: chrono::NaiveDate) -> bool {
+    date_start
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .is_some_and(|date| date >= cutoff)
+}
+
 fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<u32, Team> {
     let mut all_teams: HashMap<u32, Team> = HashMap::new();
 
@@ -308,7 +285,6 @@ fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<
             team.penalties = penalties;
             team.recompute_overall();
             team.add_events([(*event_code).to_owned()]);
-            team.update_last_match();
 
             match all_teams.entry(number) {
                 Entry::Occupied(mut slot) => {
@@ -331,115 +307,49 @@ fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<
     all_teams
 }
 
-/// One `teams` response entry, shared by roster pages and lookups.
-fn team_from_json(team: &Value) -> Option<Team> {
-    let number = team["teamNumber"].as_i64()?;
+fn team_from_info(team: &TeamInfo) -> Option<Team> {
+    let unknown = |value: &Option<String>| value.clone().unwrap_or_else(|| "Unknown".to_owned());
 
     Some(Team {
-        number: u32::try_from(number).ok()?,
-        name: team["nameShort"].as_str().unwrap_or("Unknown").to_owned(),
-        sponsors: team["nameFull"]
-            .as_str()
-            .unwrap_or("Unknown")
+        number: team.team_number?,
+        name: unknown(&team.name_short),
+        sponsors: unknown(&team.name_full)
             .replace("/", ", ")
             .replace("&", ", "),
         location: format!(
             "{}, {}, {}",
-            team["city"].as_str().unwrap_or("Unknown"),
-            team["stateProv"].as_str().unwrap_or("Unknown"),
-            team["country"].as_str().unwrap_or("Unknown")
+            unknown(&team.city),
+            unknown(&team.state_prov),
+            unknown(&team.country)
         ),
-        founded: team["rookieYear"]
-            .as_i64()
-            .and_then(|v| u16::try_from(v).ok()),
-        website: team["website"].as_str().map(|s| s.to_owned()),
+        founded: team.rookie_year,
+        website: team.website.clone(),
         ..Default::default()
     })
 }
 
-/// Red/blue split by station name (API order is not guaranteed); an absent team stays `0`.
-fn alliance_teams(match_obj: &Value) -> ([u32; 2], [u32; 2]) {
-    let (mut red, mut blue) = ([0u32; 2], [0u32; 2]);
-
-    let Some(teams) = match_obj["teams"].as_array() else {
-        return (red, blue);
-    };
-
-    for entry in teams {
-        if !entry["onField"].as_bool().unwrap_or(true) {
-            continue;
-        }
-        let Some(number) = entry["teamNumber"]
-            .as_i64()
-            .and_then(|n| u32::try_from(n).ok())
-        else {
-            continue;
-        };
-        let station = entry["station"].as_str().unwrap_or("");
-        let slot = match station.chars().last() {
-            Some('1') => 0,
-            Some('2') => 1,
-            _ => continue,
-        };
-
-        if station.starts_with("Red") {
-            red[slot] = number;
-        } else if station.starts_with("Blue") {
-            blue[slot] = number;
-        }
-    }
-
-    (red, blue)
-}
-
 #[cfg(test)]
-mod tests {
+mod event_filter_tests {
     use super::*;
-    use serde_json::json;
 
-    fn station(number: u32, station: &str, on_field: bool) -> Value {
-        json!({ "teamNumber": number, "station": station, "onField": on_field })
+    fn day(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
 
     #[test]
-    fn teams_are_placed_by_station_not_by_order() {
-        let m = json!({ "teams": [
-            station(4, "Blue2", true),
-            station(1, "Red1", true),
-            station(3, "Blue1", true),
-            station(2, "Red2", true),
-        ]});
-
-        assert_eq!(alliance_teams(&m), ([1, 2], [3, 4]));
+    fn an_event_on_the_cutoff_is_kept() {
+        assert!(started_on_or_after(Some("2026-01-10"), day("2026-01-10")));
     }
 
     #[test]
-    fn an_off_field_team_leaves_its_slot_empty() {
-        let m = json!({ "teams": [
-            station(1, "Red1", true),
-            station(2, "Red2", false),
-            station(3, "Blue1", true),
-            station(4, "Blue2", true),
-        ]});
-
-        // Team 2 is absent; team 1 must not slide into its place.
-        assert_eq!(alliance_teams(&m), ([1, 0], [3, 4]));
+    fn an_earlier_event_is_dropped() {
+        assert!(!started_on_or_after(Some("2026-01-09"), day("2026-01-10")));
     }
 
     #[test]
-    fn a_missing_team_list_yields_empty_alliances() {
-        assert_eq!(alliance_teams(&json!({})), ([0, 0], [0, 0]));
-    }
-
-    #[test]
-    fn unknown_stations_are_ignored() {
-        let m = json!({ "teams": [
-            station(1, "Red1", true),
-            station(9, "Green1", true),
-            station(7, "", true),
-        ]});
-
-        assert_eq!(alliance_teams(&m), ([1, 0], [0, 0]));
+    fn an_undated_or_unparseable_event_is_dropped() {
+        assert!(!started_on_or_after(None, day("2026-01-10")));
+        assert!(!started_on_or_after(Some("soon"), day("2026-01-10")));
     }
 }
 
@@ -504,7 +414,6 @@ mod merge_tests {
 
     #[test]
     fn events_survive_when_a_later_event_is_weaker() {
-        // Both the swap path and the keep path must preserve history.
         let merged = merge_events(
             &roster(&[1]),
             &[("STRONG", opr(&[1], &[50.0])), ("WEAK", opr(&[1], &[5.0]))],
@@ -533,8 +442,10 @@ mod merge_tests {
     }
 
     #[test]
-    fn merging_marks_the_team_as_played() {
-        let merged = merge_events(&roster(&[1]), &[("TXHOU", opr(&[1], &[10.0]))]);
-        assert!(merged[&1].has_played());
+    fn a_team_keeps_its_roster_metadata_through_the_merge() {
+        let mut base = roster(&[1]);
+        base.get_mut(&1).unwrap().location = "Houston, TX, USA".into();
+        let merged = merge_events(&base, &[("TXHOU", opr(&[1], &[10.0]))]);
+        assert_eq!(merged[&1].location, "Houston, TX, USA");
     }
 }

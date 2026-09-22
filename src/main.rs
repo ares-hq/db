@@ -1,11 +1,13 @@
 mod api_client;
 mod api_params;
+mod api_types;
 mod config;
 mod first_api;
 mod level;
 mod matches;
 mod opr;
 mod processor;
+mod stations;
 mod utils;
 mod year_adapters;
 
@@ -43,7 +45,6 @@ async fn main() -> Result<()> {
     };
     let args: Vec<String> = std::env::args().collect();
     let year = arg_value(&args, "--year").unwrap_or(this_season);
-    // A past season has no future events; fetch its whole schedule implicitly.
     let all_events = args.iter().any(|a| a == "--all-events") || year < this_season;
     let force_update = args.iter().any(|a| a == "--force-update");
 
@@ -67,7 +68,7 @@ async fn main() -> Result<()> {
     tracing::info!("Rankings updated");
 
     tracing::info!("Upserting to database");
-    processor.upsert_to_database(&teams).await?;
+    processor.upsert_to_database(&mut teams).await?;
     processor.upsert_matches(&matches).await?;
     tracing::info!("Database updated successfully");
 

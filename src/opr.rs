@@ -6,7 +6,7 @@ use ndarray::{Array1, Array2};
 
 use crate::utils::matrix_math::svd;
 
-/// Per-team OPR coefficients, all arrays indexed by position in `teams`.
+/// All arrays indexed by position in `teams`.
 #[derive(Debug, Clone)]
 pub struct Opr {
     pub teams: Vec<u32>,
@@ -32,8 +32,6 @@ impl Opr {
     }
 }
 
-/// Per-team OPR from alliance scores: one row per alliance (1 per team, score as RHS);
-/// all four metrics share the matrix.
 pub fn solve(event: &Event) -> Result<Opr> {
     let teams = event.teams();
     let column: HashMap<u32, usize> = teams.iter().enumerate().map(|(i, &t)| (t, i)).collect();
@@ -42,7 +40,7 @@ pub fn solve(event: &Event) -> Result<Opr> {
 
     let mut design = Array2::zeros((alliances.len(), teams.len()));
     for (row, alliance) in alliances.iter().enumerate() {
-        for number in alliance.present() {
+        for number in alliance.present_teams() {
             design[[row, column[&number]]] = 1.0;
         }
     }
@@ -73,7 +71,6 @@ pub fn solve(event: &Event) -> Result<Opr> {
 mod tests {
     use super::*;
 
-    /// All four metrics set to the same value, so tests assert on one number.
     fn flat(teams: [u32; 2], score: f64) -> Alliance {
         Alliance {
             teams,
@@ -84,7 +81,6 @@ mod tests {
         }
     }
 
-    /// Every pair allies once (full rank); exact sums, so a correct fit recovers `contribution`.
     fn all_pairs(n: u32, contribution: impl Fn(u32) -> f64) -> Event {
         let pairs: Vec<[u32; 2]> = (1..=n)
             .flat_map(|i| (i + 1..=n).map(move |j| [i, j]))
@@ -131,7 +127,6 @@ mod tests {
 
     #[test]
     fn opr_goes_negative_for_a_team_carried_by_partners() {
-        // Team 1 subtracts from every alliance it joins.
         let event = all_pairs(6, |t| if t == 1 { -25.0 } else { 50.0 });
         let opr = solve(&event).unwrap();
 
@@ -142,7 +137,6 @@ mod tests {
     #[test]
     fn an_empty_slot_is_not_a_team() {
         let mut event = all_pairs(4, |_| 25.0);
-        // One match run a team short: team 1 alone, credited 25.
         event.add_match(Match::new(flat([1, 0], 25.0), flat([2, 3], 50.0)));
 
         let opr = solve(&event).unwrap();
@@ -160,7 +154,6 @@ mod tests {
     #[test]
     fn an_event_with_more_teams_than_alliances_is_rejected() {
         let mut event = Event::new("TEST");
-        // 4 alliance rows, 8 teams.
         event.add_match(Match::new(flat([1, 2], 10.0), flat([3, 4], 10.0)));
         event.add_match(Match::new(flat([5, 6], 10.0), flat([7, 8], 10.0)));
 

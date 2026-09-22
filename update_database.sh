@@ -1,85 +1,70 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Runs the ARES database pipeline on a loop, rebuilding when `main` moves.
+#
+#   chmod +x ./update_database.sh
+#   nohup ./update_database.sh > monitor.log 2>&1 &
+#
+# The pipeline is one-shot: each pass fetches, solves and upserts, then exits.
+set -euo pipefail
 
-BINARY_NAME="db"
-LOG_FILE="update.log"
-BRANCH="main"
+readonly BRANCH="main"
+# Seconds between passes, measured from the end of the previous one.
+readonly RUN_INTERVAL=300
 
-check_rust() {
-    if ! command -v cargo &> /dev/null; then
-        echo "Rust/Cargo not found. Please install from https://rustup.rs/"
-        exit 1
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+binary_path() {
+    local dir
+    dir=$(cargo metadata --no-deps --format-version 1 \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+    echo "${dir:-target}/release/db"
+}
+
+build() {
+    log "Building..."
+    cargo build --release --bin db
+    log "Build complete"
+}
+
+# The pipeline exiting non-zero is a bad run, not a reason to stop looping.
+run_pipeline() {
+    local binary
+    binary=$(binary_path)
+    log "Running pipeline"
+    if "$binary" "$@"; then
+        log "Pipeline complete"
     else
-        echo "Cargo is installed."
+        log "ERROR: pipeline exited $?"
     fi
 }
 
-build_binary() {
-    echo "Building Rust binary..."
-    cargo build --release
-    if [ $? -ne 0 ]; then
-        echo "Build failed!"
-        exit 1
-    fi
-    echo "Build complete"
+check_for_updates() {
+    git fetch origin "$BRANCH" --quiet || { log "WARNING: git fetch failed"; return; }
+
+    local local_hash remote_hash
+    local_hash=$(git rev-parse HEAD)
+    remote_hash=$(git rev-parse "origin/$BRANCH")
+    [ "$local_hash" = "$remote_hash" ] && return
+
+    log "Update detected: $local_hash -> $remote_hash"
+    git reset --hard "origin/$BRANCH" --quiet || { log "ERROR: reset failed"; return; }
+    echo updated
 }
 
-stop_process() {
-    local PIDS
-    PIDS=$(pgrep -f "target/release/$BINARY_NAME")
-    if [ -n "$PIDS" ]; then
-        echo "Stopping running process: $PIDS"
-        kill $PIDS
-        wait $PIDS 2>/dev/null
-    fi
+command -v cargo >/dev/null || {
+    echo "Rust/Cargo not found. Install it from https://rustup.rs/"
+    exit 1
 }
 
-start_process() {
-    stop_process
-    echo "Running $BINARY_NAME..."
-    ./target/release/$BINARY_NAME
-    echo "Script finished."
-}
-
-check_rust
-build_binary
-start_process
+build
+run_pipeline "$@"
 
 while true; do
-    echo "[$(date)] Checking for Git updates..."
+    log "Sleeping ${RUN_INTERVAL}s"
+    sleep "$RUN_INTERVAL"
 
-    git fetch origin $BRANCH > fetch_output.log 2>&1
-    if [ $? -ne 0 ]; then
-        echo "Git fetch failed! See fetch_output.log"
-        sleep 150
-        continue
-    fi
-
-    LOCAL=$(git rev-parse HEAD)
-    REMOTE=$(git rev-parse origin/$BRANCH)
-
-    echo "LOCAL: $LOCAL"
-    echo "REMOTE: $REMOTE"
-
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "Changes detected. Pulling latest from $BRANCH..."
-        git reset --hard origin/$BRANCH > pull_output.log 2>&1
-
-        if [ $? -ne 0 ]; then
-            echo "Git pull failed! See pull_output.log"
-            sleep 300
-            continue
-        fi
-
-        echo "Rebuilding binary..."
-        build_binary
-    else
-        echo "No updates found."
-    fi
-
-    echo "Restarting process..."
-    start_process
-    echo "Process complete..."
-
-    echo "Sleeping for 2.5 minutes..."
-    sleep 300
+    [ -n "$(check_for_updates)" ] && build
+    run_pipeline "$@"
 done

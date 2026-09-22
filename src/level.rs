@@ -1,10 +1,11 @@
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Level {
     Practice,
     Qualification,
     Playoff,
+    #[default]
     Unknown,
 }
 
@@ -41,6 +42,12 @@ impl Serialize for Level {
     }
 }
 
+impl<'de> Deserialize<'de> for Level {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Self::from_api(&String::deserialize(d)?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,6 +63,18 @@ mod tests {
     fn unknown_strings_fall_through() {
         assert_eq!(Level::from_api("SOMETHING_NEW"), Level::Unknown);
         assert_eq!(Level::from_api(""), Level::Unknown);
+    }
+
+    #[test]
+    fn deserializes_from_the_api_string() {
+        let level: Level = serde_json::from_value(serde_json::json!("PLAYOFF")).unwrap();
+        assert_eq!(level, Level::Playoff);
+    }
+
+    #[test]
+    fn deserializing_an_unknown_string_does_not_fail() {
+        let level: Level = serde_json::from_value(serde_json::json!("SOMETHING_NEW")).unwrap();
+        assert_eq!(level, Level::Unknown);
     }
 
     #[test]
