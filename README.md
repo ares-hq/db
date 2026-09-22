@@ -1,121 +1,54 @@
-# 🤖 ARES-Database — Automated Ranking & Evaluation System
+# ARES — Database Pipeline
 
-Welcome to **ARES-Database**, the backend engine for managing and updating team performance metrics for FTC competitions. This tool connects to the official FTC API, calculates OPR-based statistics, ranks teams, and stores everything in a Supabase database — all with intelligent update logic.
+Fetches a season from the FIRST API, solves per-team OPR, ranks every team, and upserts to
+Supabase. One run is one pass: fetch, solve, write, exit. The Discord bot reads what this
+writes; table names are shared through [`model::tables`](https://github.com/ares-hq/model).
 
----
+## Tables
 
-## 🚀 Setup Instructions
+| Table | Key | Contents |
+|---|---|---|
+| `season_<year>` | `teamNumber` | OPR by phase, ranks, metadata, events attended |
+| `matches_<year>` | `matchcode` | Two rows per played match, one per alliance |
 
-### 1. Clone the repository
+`matchcode` hashes match identity, never score, so a rescored match updates in place.
 
-```bash
-git clone https://github.com/henrybon806/ARES-Database.git
-cd ARES-Database
-```
+`overallOPR` is `auto + teleop`. Endgame and penalties rank on their own axes, penalties
+ascending.
 
-### 2. Create a `.env` file
-
-Copy and paste this template into a new file called `.env`:
+## Run
 
 ```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-anon-or-service-role-key
-FIRST_USERNAME=your-first-api-username
-FIRST_PASS=your-first-api-password
+SUPABASE_URL=
+SUPABASE_KEY=
+FIRST_USERNAME=
+FIRST_PASS=
 ```
-
-### 3. Install dependencies
-
-We recommend using a virtual environment:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cargo run --release --bin db -- --year 2025 --all-events
 ```
 
-### 4. Run the main script
+| Flag | Effect |
+|---|---|
+| `--year <YEAR>` | Season. Defaults to the current one, rolling over in August. |
+| `--all-events` | Whole schedule, not just the last week onward. Implied for past seasons. |
+| `--force-update` | Overwrite stored figures even when the stored event was stronger. |
+
+`RUST_LOG=debug` turns up the logging.
+
+## Deploy
+
+A batch job, so it runs one-shot on a timer rather than as a supervised loop: recent
+events every 15 minutes, the whole season nightly. Setup in
+[`deploy/README.md`](../deploy/README.md).
 
 ```bash
-python ManageDatabase.py
+sudo systemctl start ares-db.service
 ```
 
-You can optionally run with debug:
+## Tests
 
 ```bash
-python ManageDatabase.py --debug
+cargo test -p db
 ```
-
-Or edit `main()` in `ManageDatabase.py` to toggle `debug=True` and `force_update=True` as needed.
-
----
-
-## 🧠 Features
-
-- Fetches latest team data from the official FTC API
-- Calculates Auto, TeleOp, Endgame, and Overall OPR
-- Smart merging: only updates Supabase if data improves or when `force_update=True`
-- Dynamically re-ranks teams after updates
-- Easily extendable to other seasons or stat metrics
-
----
-
-## 🛠 Helpful Notes
-
-### Kill a Python process:
-```bash
-ps -ef | grep python3
-kill {process_id}
-```
-
-### Run the app in the background:
-```bash
-chmod +x ./update_database.sh
-nohup ./update_database.sh > monitor.log 2>&1 &
-```
-
-### View live logs:
-```bash
-tail -f monitor.log
-```
-
----
-
-## 📦 Project Structure
-
-```
-ARES-Database/
-│
-├── API_Library/           # API handlers, data models, math logic
-├── .env                   # Environment variables (keep secret!)
-├── ManageDatabase.py      # Main execution script
-├── monitor_and_run.sh     # Script for auto-running and monitoring
-├── requirements.txt       # Python dependencies
-└── README.md              # You're here!
-```
-
----
-
-## 💡 Tips
-
-- You can switch between `force_update=True` and `False` inside `fetch_and_save_to_database()` depending on whether you want to overwrite all data or only update improvements.
-- Supabase conflicts are handled via `upsert()` using `teamNumber` as the key.
-- For large batches, performance can be improved with connection pooling and async fetchers (planned for future releases).
-
----
-
-## 👨‍💻 Author
-
-**Henry Bonomolo**  
-Email: hbono@berkeley.edu  
-GitHub: [@henrybono](https://github.com/henrybono)
-
----
-
-## 📜 License
-
-MIT License. Feel free to use, improve, and share — just credit where credit is due!
-
----
-
-_The ARES system — built to empower teams through stats, structure, and strategy._ ⚙️
