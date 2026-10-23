@@ -147,11 +147,17 @@ impl FirstApi {
         let params = ApiParams::new(vec![year.to_string(), "events".to_owned()]);
         let resp: EventsResponse = self.client.get(&params).await?;
 
-        let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(7);
+        let today = chrono::Utc::now().date_naive();
+        let from = if all_events {
+            chrono::NaiveDate::MIN
+        } else {
+            today - chrono::Duration::days(7)
+        };
         Ok(resp
             .events
             .into_iter()
-            .filter(|e| all_events || started_on_or_after(e.date_start.as_deref(), cutoff))
+            .filter(|e| e.type_name.has_matches())
+            .filter(|e| started_between(e.date_start.as_deref(), from, today))
             .filter_map(|e| e.code)
             .collect())
     }
@@ -263,10 +269,14 @@ impl FirstApi {
     }
 }
 
-fn started_on_or_after(date_start: Option<&str>, cutoff: chrono::NaiveDate) -> bool {
+fn started_between(
+    date_start: Option<&str>,
+    from: chrono::NaiveDate,
+    to: chrono::NaiveDate,
+) -> bool {
     date_start
         .and_then(|d| chrono::NaiveDate::parse_and_remainder(d, "%Y-%m-%d").ok())
-        .is_some_and(|(date, _)| date >= cutoff)
+        .is_some_and(|(date, _)| (from..=to).contains(&date))
 }
 
 fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<u32, Team> {
@@ -336,26 +346,26 @@ mod event_filter_tests {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
 
-    #[test]
-    fn an_event_on_the_cutoff_is_kept() {
-        assert!(started_on_or_after(
-            Some("2026-01-10T00:00:00"),
-            day("2026-01-10")
-        ));
+    fn started(date: Option<&str>) -> bool {
+        started_between(date, day("2026-01-10"), day("2026-01-17"))
     }
 
     #[test]
-    fn an_earlier_event_is_dropped() {
-        assert!(!started_on_or_after(
-            Some("2026-01-09T00:00:00"),
-            day("2026-01-10")
-        ));
+    fn an_event_on_either_bound_is_kept() {
+        assert!(started(Some("2026-01-10T00:00:00")));
+        assert!(started(Some("2026-01-17T00:00:00")));
+    }
+
+    #[test]
+    fn an_event_outside_the_window_is_dropped() {
+        assert!(!started(Some("2026-01-09T00:00:00")));
+        assert!(!started(Some("2026-01-18T00:00:00")));
     }
 
     #[test]
     fn an_undated_or_unparseable_event_is_dropped() {
-        assert!(!started_on_or_after(None, day("2026-01-10")));
-        assert!(!started_on_or_after(Some("soon"), day("2026-01-10")));
+        assert!(!started(None));
+        assert!(!started(Some("soon")));
     }
 }
 
