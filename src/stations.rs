@@ -1,11 +1,11 @@
 use crate::api_types::StationEntry;
 
-/// `(red, blue)` in station order; an absent or off-field team stays `0`.
+/// `(red, blue)` in station order; an absent or disqualified team stays `0`.
 pub fn alliance_teams(entries: &[StationEntry]) -> ([u32; 2], [u32; 2]) {
     let (mut red, mut blue) = ([0u32; 2], [0u32; 2]);
 
     for entry in entries {
-        if !entry.on_field {
+        if entry.dq {
             continue;
         }
         let Some(number) = entry.team_number else {
@@ -32,33 +32,40 @@ pub fn alliance_teams(entries: &[StationEntry]) -> ([u32; 2], [u32; 2]) {
 mod tests {
     use super::*;
 
-    fn station(number: u32, station: &str, on_field: bool) -> StationEntry {
+    fn station(number: u32, station: &str) -> StationEntry {
         StationEntry {
             team_number: Some(number),
             station: station.to_owned(),
-            on_field,
+            dq: false,
+        }
+    }
+
+    fn disqualified(number: u32, station: &str) -> StationEntry {
+        StationEntry {
+            dq: true,
+            ..self::station(number, station)
         }
     }
 
     #[test]
     fn teams_are_placed_by_station_not_by_order() {
         let entries = [
-            station(4, "Blue2", true),
-            station(1, "Red1", true),
-            station(3, "Blue1", true),
-            station(2, "Red2", true),
+            station(4, "Blue2"),
+            station(1, "Red1"),
+            station(3, "Blue1"),
+            station(2, "Red2"),
         ];
 
         assert_eq!(alliance_teams(&entries), ([1, 2], [3, 4]));
     }
 
     #[test]
-    fn an_off_field_team_leaves_its_slot_empty() {
+    fn a_disqualified_team_leaves_its_slot_empty() {
         let entries = [
-            station(1, "Red1", true),
-            station(2, "Red2", false),
-            station(3, "Blue1", true),
-            station(4, "Blue2", true),
+            station(1, "Red1"),
+            disqualified(2, "Red2"),
+            station(3, "Blue1"),
+            station(4, "Blue2"),
         ];
 
         assert_eq!(alliance_teams(&entries), ([1, 0], [3, 4]));
@@ -66,15 +73,12 @@ mod tests {
 
     #[test]
     fn a_lone_second_station_keeps_its_slot() {
-        assert_eq!(
-            alliance_teams(&[station(7, "Red2", true)]),
-            ([0, 7], [0, 0])
-        );
+        assert_eq!(alliance_teams(&[station(7, "Red2")]), ([0, 7], [0, 0]));
     }
 
     #[test]
     fn station_case_is_ignored() {
-        let entries = [station(1, "RED1", true), station(2, "blue2", true)];
+        let entries = [station(1, "RED1"), station(2, "blue2")];
         assert_eq!(alliance_teams(&entries), ([1, 0], [0, 2]));
     }
 
@@ -85,11 +89,7 @@ mod tests {
 
     #[test]
     fn unknown_stations_are_ignored() {
-        let entries = [
-            station(1, "Red1", true),
-            station(9, "Green1", true),
-            station(7, "", true),
-        ];
+        let entries = [station(1, "Red1"), station(9, "Green1"), station(7, "")];
 
         assert_eq!(alliance_teams(&entries), ([1, 0], [0, 0]));
     }

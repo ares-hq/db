@@ -196,13 +196,13 @@ mod tests {
     }
 
     #[test]
-    fn an_off_field_team_is_not_recorded() {
+    fn a_disqualified_team_is_not_recorded() {
         let m = json!({
             "actualStartTime": "2025-11-16T13:39:29.611+00:00",
             "scoreRedFinal": 10, "scoreBlueFinal": 5,
             "teams": [
                 { "teamNumber": 1, "station": "Red1" },
-                { "teamNumber": 2, "station": "Red2", "onField": false },
+                { "teamNumber": 2, "station": "Red2", "dq": true },
             ]
         });
         let rows = MatchRow::rows_for("E", &parse(m));

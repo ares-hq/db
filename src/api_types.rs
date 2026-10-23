@@ -2,10 +2,6 @@ use serde::Deserialize;
 
 use crate::level::Level;
 
-fn yes() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TeamsResponse {
@@ -67,9 +63,8 @@ pub struct MatchInfo {
 pub struct StationEntry {
     pub team_number: Option<u32>,
     pub station: String,
-    /// Absent means the team played; only a surrogate is flagged `false`.
-    #[serde(default = "yes")]
-    pub on_field: bool,
+    /// Set for a no-show; `onField` is unreliable from 2026.
+    pub dq: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -142,10 +137,10 @@ mod tests {
     }
 
     #[test]
-    fn a_station_without_on_field_is_treated_as_playing() {
+    fn a_station_without_dq_is_treated_as_playing() {
         let e: StationEntry =
             serde_json::from_value(json!({ "teamNumber": 1, "station": "Red1" })).unwrap();
-        assert!(e.on_field);
+        assert!(!e.dq);
     }
 
     #[test]
