@@ -265,8 +265,8 @@ impl FirstApi {
 
 fn started_on_or_after(date_start: Option<&str>, cutoff: chrono::NaiveDate) -> bool {
     date_start
-        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-        .is_some_and(|date| date >= cutoff)
+        .and_then(|d| chrono::NaiveDate::parse_and_remainder(d, "%Y-%m-%d").ok())
+        .is_some_and(|(date, _)| date >= cutoff)
 }
 
 fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<u32, Team> {
@@ -338,12 +338,18 @@ mod event_filter_tests {
 
     #[test]
     fn an_event_on_the_cutoff_is_kept() {
-        assert!(started_on_or_after(Some("2026-01-10"), day("2026-01-10")));
+        assert!(started_on_or_after(
+            Some("2026-01-10T00:00:00"),
+            day("2026-01-10")
+        ));
     }
 
     #[test]
     fn an_earlier_event_is_dropped() {
-        assert!(!started_on_or_after(Some("2026-01-09"), day("2026-01-10")));
+        assert!(!started_on_or_after(
+            Some("2026-01-09T00:00:00"),
+            day("2026-01-10")
+        ));
     }
 
     #[test]

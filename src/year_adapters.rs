@@ -9,7 +9,6 @@ pub trait ScoreAdapter: Send + Sync {
 pub struct DefaultModernAdapter;
 pub struct LegacyPenaltyAdapter;
 pub struct Decode2025Adapter;
-pub struct Biobuzz2026Adapter;
 
 fn red_and_blue(score: &MatchScore, pick: fn(&AllianceScore) -> i32) -> (i32, i32) {
     (pick(score.red()), pick(score.blue()))
@@ -45,20 +44,8 @@ impl ScoreAdapter for Decode2025Adapter {
     }
 }
 
-// TODO(BIOBUZZ): endgame key is a guess; confirm against the 2026 score schema.
-impl ScoreAdapter for Biobuzz2026Adapter {
-    fn endgame_points(&self, score: &MatchScore) -> (i32, i32) {
-        red_and_blue(score, |a| a.teleop_base_points)
-    }
-
-    fn penalties(&self, score: &MatchScore) -> (i32, i32) {
-        red_and_blue(score, |a| a.foul_points_committed)
-    }
-}
-
 pub fn adapter_for_year(year: i32) -> &'static dyn ScoreAdapter {
     match year {
-        2026 => &Biobuzz2026Adapter,
         2025 => &Decode2025Adapter,
         2019..=2023 => &LegacyPenaltyAdapter,
         _ => &DefaultModernAdapter,
@@ -114,5 +101,6 @@ mod tests {
         assert_eq!(adapter_for_year(2025).endgame_points(&score()), (30, 5));
         assert_eq!(adapter_for_year(2022).endgame_points(&score()), (40, 6));
         assert_eq!(adapter_for_year(2024).endgame_points(&score()), (30, 7));
+        assert_eq!(adapter_for_year(2026).endgame_points(&score()), (30, 7));
     }
 }
