@@ -33,6 +33,60 @@ pub struct EventsResponse {
 pub struct EventSummary {
     pub code: Option<String>,
     pub date_start: Option<String>,
+    pub type_name: EventType,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum EventType {
+    #[serde(rename = "Non-Advancement")]
+    NonAdvancement,
+    #[serde(rename = "League Meet")]
+    LeagueMeet,
+    Qualifier,
+    #[serde(rename = "League Tournament")]
+    LeagueTournament,
+    Championship,
+    #[serde(rename = "FIRST Championship")]
+    FirstChampionship,
+    #[serde(rename = "Super Qualifier")]
+    SuperQualifier,
+    #[serde(rename = "Off-Season")]
+    OffSeason,
+    Premier,
+    Kickoff,
+    Workshop,
+    #[serde(rename = "Demo / Exhibition")]
+    DemoExhibition,
+    #[serde(rename = "Volunteer Signup")]
+    VolunteerSignup,
+    #[serde(rename = "Practice Day")]
+    PracticeDay,
+    /// A type this crate does not know yet; assumed to play matches.
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+impl EventType {
+    pub fn has_matches(self) -> bool {
+        match self {
+            Self::Kickoff
+            | Self::Workshop
+            | Self::DemoExhibition
+            | Self::VolunteerSignup
+            | Self::PracticeDay => false,
+            Self::NonAdvancement
+            | Self::LeagueMeet
+            | Self::Qualifier
+            | Self::LeagueTournament
+            | Self::Championship
+            | Self::FirstChampionship
+            | Self::SuperQualifier
+            | Self::OffSeason
+            | Self::Premier
+            | Self::Other => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -174,6 +228,22 @@ mod tests {
         let s = MatchScore::default();
         assert_eq!(s.red().foul_points_committed, 0);
         assert_eq!(s.blue().teleop_base_points, 0);
+    }
+
+    #[test]
+    fn event_types_parse_from_their_display_names() {
+        let e: EventSummary =
+            serde_json::from_value(json!({ "typeName": "Demo / Exhibition" })).unwrap();
+        assert_eq!(e.type_name, EventType::DemoExhibition);
+        assert!(!e.type_name.has_matches());
+    }
+
+    #[test]
+    fn an_unknown_or_missing_event_type_is_assumed_to_play_matches() {
+        let e: EventSummary = serde_json::from_value(json!({ "typeName": "Scrimmage" })).unwrap();
+        assert_eq!(e.type_name, EventType::Other);
+        let e: EventSummary = serde_json::from_value(json!({})).unwrap();
+        assert!(e.type_name.has_matches());
     }
 
     #[test]
