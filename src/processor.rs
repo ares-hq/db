@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::future::try_join_all;
 use model::prelude::{Supabase, Team};
 
 use crate::matches::MatchRow;
@@ -9,6 +10,8 @@ use std::collections::HashMap;
 use crate::config::Config;
 
 const TIE_TOLERANCE: f64 = 1e-6;
+/// Keeps the `in.(…)` filter well under URL length limits.
+const SELECT_CHUNK: usize = 500;
 
 pub struct Processor {
     client: Supabase,
@@ -41,9 +44,15 @@ impl Processor {
         mut teams: HashMap<u32, Team>,
         force_update: bool,
     ) -> Result<HashMap<u32, Team>> {
-        let stored = self.client.teams(&self.table).await?;
+        let numbers: Vec<u32> = teams.keys().copied().collect();
+        let stored = try_join_all(
+            numbers
+                .chunks(SELECT_CHUNK)
+                .map(|chunk| self.client.teams_in(&self.table, chunk)),
+        )
+        .await?;
 
-        for row in stored {
+        for row in stored.into_iter().flatten() {
             let Some(team) = teams.get_mut(&row.number) else {
                 continue;
             };
