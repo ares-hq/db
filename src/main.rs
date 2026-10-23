@@ -59,6 +59,11 @@ async fn main() -> Result<()> {
         matches.len()
     );
 
+    if teams.is_empty() && matches.is_empty() {
+        tracing::info!("Nothing to update");
+        return Ok(());
+    }
+
     tracing::info!("Merging with existing database");
     teams = processor.merge_with_database(teams, force_update).await?;
     tracing::info!("Merge complete");

@@ -34,9 +34,6 @@ impl FirstApi {
 
         tracing::info!("Processing {} events for season {}", events.len(), year);
 
-        let mut roster = self.fetch_team_roster(year).await?;
-        tracing::info!(teams = roster.len(), "Fetched season team roster");
-
         let sem = Semaphore::new(16);
         let tasks: Vec<_> = events
             .iter()
@@ -66,6 +63,13 @@ impl FirstApi {
             solved.push((code, opr));
         }
 
+        if solved.is_empty() {
+            return Ok((HashMap::new(), matches));
+        }
+
+        let mut roster = self.fetch_team_roster(year).await?;
+        tracing::info!(teams = roster.len(), "Fetched season team roster");
+
         let added = self.fetch_missing_teams(year, &solved, &mut roster).await;
         if added > 0 {
             tracing::info!(
@@ -91,19 +95,25 @@ impl FirstApi {
         missing.sort_unstable();
         missing.dedup();
 
-        let mut added = 0;
-        for number in missing {
-            match Self::fetch_team_info(&self.client, number, year).await {
-                Ok(team) => {
-                    roster.insert(number, team);
-                    added += 1;
-                }
-                Err(err) => {
-                    tracing::warn!(team = number, error = %err, "Skipping unknown team");
+        let sem = Semaphore::new(8);
+        let fetched = join_all(missing.into_iter().map(|number| {
+            let sem = &sem;
+            async move {
+                let _permit = sem.acquire().await.ok()?;
+                match Self::fetch_team_info(&self.client, number, year).await {
+                    Ok(team) => Some((number, team)),
+                    Err(err) => {
+                        tracing::warn!(team = number, error = %err, "Skipping unknown team");
+                        None
+                    }
                 }
             }
-        }
-        added
+        }))
+        .await;
+
+        let before = roster.len();
+        roster.extend(fetched.into_iter().flatten());
+        roster.len() - before
     }
 
     /// Paged 500 at a time.
