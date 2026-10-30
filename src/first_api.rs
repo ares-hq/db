@@ -228,6 +228,13 @@ impl FirstApi {
         if event.is_empty() {
             return Err(anyhow!("no scored qualification matches"));
         }
+        if lacks_endgame(&event) {
+            tracing::warn!(
+                event = event_code,
+                year,
+                "No endgame points in any match; the season's score fields may have changed"
+            );
+        }
 
         let matches = matches_raw
             .iter()
@@ -275,6 +282,14 @@ impl FirstApi {
             .and_then(team_from_info)
             .ok_or_else(|| anyhow!("team {team_number} not found for season {year}"))
     }
+}
+
+fn lacks_endgame(event: &Event) -> bool {
+    event
+        .matches
+        .iter()
+        .flat_map(Match::alliances)
+        .all(|a| a.endgame == 0.0)
 }
 
 fn started_between(
@@ -373,6 +388,27 @@ mod event_filter_tests {
     fn an_undated_or_unparseable_event_is_dropped() {
         assert!(!started(None));
         assert!(!started(Some("soon")));
+    }
+}
+
+#[cfg(test)]
+mod endgame_tests {
+    use super::*;
+
+    fn event(endgame: f64) -> Event {
+        let mut event = Event::new("USAZTUQ");
+        let red = Alliance {
+            endgame,
+            ..Alliance::new([1, 2])
+        };
+        event.add_match(Match::new(red, Alliance::new([3, 4])));
+        event
+    }
+
+    #[test]
+    fn an_event_without_any_endgame_points_is_flagged() {
+        assert!(lacks_endgame(&event(0.0)));
+        assert!(!lacks_endgame(&event(15.0)));
     }
 }
 
