@@ -5,15 +5,13 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use tokio::sync::Semaphore;
 
-use crate::api_client::ApiClient;
-use crate::api_params::ApiParams;
-use crate::api_types::{
-    EventsResponse, MatchInfo, MatchScore, MatchesResponse, ScoresResponse, TeamInfo, TeamsResponse,
+use model::first::{
+    ApiClient, ApiParams, EventCode, EventsResponse, Level, MatchInfo, MatchScore, MatchesResponse,
+    ScoresResponse, TeamInfo, TeamsResponse, alliance_teams,
 };
-use crate::level::Level;
+
 use crate::matches::MatchRow;
 use crate::opr::{self, Opr};
-use crate::stations::alliance_teams;
 use crate::year_adapters::adapter_for_year;
 
 pub struct FirstApi {
@@ -167,8 +165,8 @@ impl FirstApi {
             .events
             .into_iter()
             .filter(|e| e.type_name.has_matches())
-            .filter(|e| started_between(e.date_start.as_deref(), from, today))
-            .filter_map(|e| e.code)
+            .filter(|e| started_between(e.date_start, from, today))
+            .filter_map(|e| e.code.map(EventCode::into_string))
             .collect())
     }
 
@@ -280,13 +278,11 @@ impl FirstApi {
 }
 
 fn started_between(
-    date_start: Option<&str>,
+    date_start: Option<chrono::NaiveDateTime>,
     from: chrono::NaiveDate,
     to: chrono::NaiveDate,
 ) -> bool {
-    date_start
-        .and_then(|d| chrono::NaiveDate::parse_and_remainder(d, "%Y-%m-%d").ok())
-        .is_some_and(|(date, _)| (from..=to).contains(&date))
+    date_start.is_some_and(|start| (from..=to).contains(&start.date()))
 }
 
 fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<u32, Team> {
@@ -357,7 +353,8 @@ mod event_filter_tests {
     }
 
     fn started(date: Option<&str>) -> bool {
-        started_between(date, day("2026-01-10"), day("2026-01-17"))
+        let start = date.and_then(|d| d.parse().ok());
+        started_between(start, day("2026-01-10"), day("2026-01-17"))
     }
 
     #[test]

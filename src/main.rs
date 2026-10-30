@@ -1,23 +1,18 @@
-mod api_client;
-mod api_params;
-mod api_types;
 mod config;
 mod first_api;
-mod level;
 mod matches;
 mod opr;
 mod processor;
-mod stations;
 mod utils;
 mod year_adapters;
 
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
-use crate::api_client::ApiClient;
 use crate::config::Config;
 use crate::first_api::FirstApi;
 use crate::processor::Processor;
+use model::first::{self, ApiClient};
 use model::prelude::current_season;
 
 #[tokio::main]
@@ -32,7 +27,7 @@ async fn main() -> Result<()> {
     tracing::info!("Loaded configuration");
 
     let api_client = ApiClient::new(
-        "https://ftc-api.firstinspires.org/v2.0",
+        first::BASE_URL,
         config.first_username.clone(),
         config.first_password.clone(),
     )?;

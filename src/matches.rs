@@ -1,7 +1,5 @@
-use crate::api_types::MatchInfo;
-use crate::level::Level;
-use crate::stations::alliance_teams;
 use md5::{Digest, Md5};
+use model::first::{Level, MatchInfo, alliance_teams};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -96,8 +94,8 @@ mod tests {
     #[test]
     fn hash_is_the_match_identity_not_its_score() {
         assert_eq!(
-            MatchRow::hash("USTXCMP", Level::Qualification, 5, 0, "red"),
-            "1093f8f42e17f22f44613527718f893f"
+            MatchRow::hash("USAZTUQ", Level::Qualification, 5, 0, "red"),
+            "193451a7f4eaf687c1fc3583bd737eb2"
         );
     }
 
@@ -129,7 +127,7 @@ mod tests {
 
     #[test]
     fn builds_both_alliances_from_one_match() {
-        let [red, blue]: [MatchRow; 2] = MatchRow::rows_for("USTXCMP", &parse(match_json()))
+        let [red, blue]: [MatchRow; 2] = MatchRow::rows_for("USAZTUQ", &parse(match_json()))
             .try_into()
             .unwrap();
 
