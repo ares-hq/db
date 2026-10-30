@@ -5,15 +5,13 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use tokio::sync::Semaphore;
 
-use crate::api_client::ApiClient;
-use crate::api_params::ApiParams;
-use crate::api_types::{
-    EventsResponse, MatchInfo, MatchScore, MatchesResponse, ScoresResponse, TeamInfo, TeamsResponse,
+use model::first::{
+    ApiClient, ApiParams, EventCode, EventsResponse, Level, MatchInfo, MatchScore, MatchesResponse,
+    ScoresResponse, TeamInfo, TeamsResponse, alliance_teams,
 };
-use crate::level::Level;
+
 use crate::matches::MatchRow;
 use crate::opr::{self, Opr};
-use crate::stations::alliance_teams;
 use crate::year_adapters::adapter_for_year;
 
 pub struct FirstApi {
@@ -89,7 +87,7 @@ impl FirstApi {
     ) -> usize {
         let mut missing: Vec<u32> = solved
             .iter()
-            .flat_map(|(_, opr)| opr.teams.iter().copied())
+            .flat_map(|(_, opr)| opr.teams())
             .filter(|number| !roster.contains_key(number))
             .collect();
         missing.sort_unstable();
@@ -167,8 +165,8 @@ impl FirstApi {
             .events
             .into_iter()
             .filter(|e| e.type_name.has_matches())
-            .filter(|e| started_between(e.date_start.as_deref(), from, today))
-            .filter_map(|e| e.code)
+            .filter(|e| started_between(e.date_start, from, today))
+            .filter_map(|e| e.code.map(EventCode::into_string))
             .collect())
     }
 
@@ -230,6 +228,13 @@ impl FirstApi {
         if event.is_empty() {
             return Err(anyhow!("no scored qualification matches"));
         }
+        if lacks_endgame(&event) {
+            tracing::warn!(
+                event = event_code,
+                year,
+                "No endgame points in any match; the season's score fields may have changed"
+            );
+        }
 
         let matches = matches_raw
             .iter()
@@ -279,14 +284,20 @@ impl FirstApi {
     }
 }
 
+fn lacks_endgame(event: &Event) -> bool {
+    event
+        .matches
+        .iter()
+        .flat_map(Match::alliances)
+        .all(|a| a.endgame == 0.0)
+}
+
 fn started_between(
-    date_start: Option<&str>,
+    date_start: Option<chrono::NaiveDateTime>,
     from: chrono::NaiveDate,
     to: chrono::NaiveDate,
 ) -> bool {
-    date_start
-        .and_then(|d| chrono::NaiveDate::parse_and_remainder(d, "%Y-%m-%d").ok())
-        .is_some_and(|(date, _)| (from..=to).contains(&date))
+    date_start.is_some_and(|start| (from..=to).contains(&start.date()))
 }
 
 fn merge_events(roster: &HashMap<u32, Team>, solved: &[(&str, Opr)]) -> HashMap<u32, Team> {
@@ -357,7 +368,8 @@ mod event_filter_tests {
     }
 
     fn started(date: Option<&str>) -> bool {
-        started_between(date, day("2026-01-10"), day("2026-01-17"))
+        let start = date.and_then(|d| d.parse().ok());
+        started_between(start, day("2026-01-10"), day("2026-01-17"))
     }
 
     #[test]
@@ -380,9 +392,29 @@ mod event_filter_tests {
 }
 
 #[cfg(test)]
+mod endgame_tests {
+    use super::*;
+
+    fn event(endgame: f64) -> Event {
+        let mut event = Event::new("USAZTUQ");
+        let red = Alliance {
+            endgame,
+            ..Alliance::new([1, 2])
+        };
+        event.add_match(Match::new(red, Alliance::new([3, 4])));
+        event
+    }
+
+    #[test]
+    fn an_event_without_any_endgame_points_is_flagged() {
+        assert!(lacks_endgame(&event(0.0)));
+        assert!(!lacks_endgame(&event(15.0)));
+    }
+}
+
+#[cfg(test)]
 mod merge_tests {
     use super::*;
-    use ndarray::Array1;
 
     fn roster(numbers: &[u32]) -> HashMap<u32, Team> {
         numbers
@@ -392,14 +424,11 @@ mod merge_tests {
     }
 
     fn opr(teams: &[u32], scores: &[f64]) -> Opr {
-        let col = || Array1::from_iter(scores.iter().copied());
-        Opr {
-            teams: teams.to_vec(),
-            auto: col(),
-            teleop: col(),
-            endgame: col(),
-            penalties: col(),
-        }
+        Opr(teams
+            .iter()
+            .zip(scores)
+            .map(|(&t, &s)| (t, [s; 4]))
+            .collect())
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::api_types::{AllianceScore, MatchScore};
+use model::first::{AllianceScore, MatchScore};
 
 /// Per-season point buckets for endgame and penalties.
 pub trait ScoreAdapter: Send + Sync {
