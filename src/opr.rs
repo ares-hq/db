@@ -2,33 +2,21 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use model::prelude::{Alliance, Event, Match};
-use ndarray::{Array1, Array2};
+use nalgebra::DMatrix;
 
-use crate::utils::matrix_math::svd;
+use crate::utils::matrix_math::least_squares;
 
-/// All arrays indexed by position in `teams`.
-#[derive(Debug, Clone)]
-pub struct Opr {
-    pub teams: Vec<u32>,
-    pub auto: Array1<f64>,
-    pub teleop: Array1<f64>,
-    pub endgame: Array1<f64>,
-    pub penalties: Array1<f64>,
-}
+/// `(team, [auto, teleop, endgame, penalties])` in event team order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Opr(pub Vec<(u32, [f64; 4])>);
 
 impl Opr {
     pub fn iter(&self) -> impl Iterator<Item = (u32, [f64; 4])> + '_ {
-        self.teams.iter().enumerate().map(|(i, &number)| {
-            (
-                number,
-                [
-                    self.auto[i],
-                    self.teleop[i],
-                    self.endgame[i],
-                    self.penalties[i],
-                ],
-            )
-        })
+        self.0.iter().copied()
+    }
+
+    pub fn teams(&self) -> impl Iterator<Item = u32> + '_ {
+        self.0.iter().map(|&(number, _)| number)
     }
 }
 
@@ -38,33 +26,23 @@ pub fn solve(event: &Event) -> Result<Opr> {
 
     let alliances: Vec<&Alliance> = event.matches.iter().flat_map(Match::alliances).collect();
 
-    let mut design = Array2::zeros((alliances.len(), teams.len()));
+    let mut design = DMatrix::zeros(alliances.len(), teams.len());
     for (row, alliance) in alliances.iter().enumerate() {
         for number in alliance.present_teams() {
-            design[[row, column[&number]]] = 1.0;
+            design[(row, column[&number])] = 1.0;
         }
     }
+    let scores = DMatrix::from_fn(alliances.len(), 4, |row, phase| {
+        let a = alliances[row];
+        [a.auto, a.teleop, a.endgame, a.penalties][phase]
+    });
 
-    let rhs = |score: fn(&Alliance) -> f64| Array1::from_iter(alliances.iter().map(|a| score(a)));
-    let (auto, teleop, endgame, penalties) = (
-        rhs(|a| a.auto),
-        rhs(|a| a.teleop),
-        rhs(|a| a.endgame),
-        rhs(|a| a.penalties),
-    );
-
-    let solved = svd(&design, &[&auto, &teleop, &endgame, &penalties])?;
-    let [auto, teleop, endgame, penalties]: [Array1<f64>; 4] = solved
-        .try_into()
-        .expect("four right-hand sides in, four solutions out");
-
-    Ok(Opr {
-        teams,
-        auto,
-        teleop,
-        endgame,
-        penalties,
-    })
+    let solved = least_squares(design, &scores)?;
+    Ok(Opr(teams
+        .into_iter()
+        .enumerate()
+        .map(|(i, number)| (number, std::array::from_fn(|phase| solved[(i, phase)])))
+        .collect()))
 }
 
 #[cfg(test)]
@@ -121,8 +99,7 @@ mod tests {
     fn columns_follow_event_team_order() {
         let event = all_pairs(6, |t| t as f64);
         let opr = solve(&event).unwrap();
-        assert_eq!(opr.teams, event.teams());
-        assert_eq!(opr.auto.len(), opr.teams.len());
+        assert_eq!(opr.teams().collect::<Vec<_>>(), event.teams());
     }
 
     #[test]
@@ -142,9 +119,8 @@ mod tests {
         let opr = solve(&event).unwrap();
 
         assert!(
-            !opr.teams.contains(&0),
-            "slot 0 became a column: {:?}",
-            opr.teams
+            !opr.teams().any(|n| n == 0),
+            "slot 0 became a column: {opr:?}"
         );
         for (number, [auto, ..]) in opr.iter() {
             assert!((auto - 25.0).abs() < 1e-9, "team {number}: {auto} vs 25");

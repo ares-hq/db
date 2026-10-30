@@ -87,7 +87,7 @@ impl FirstApi {
     ) -> usize {
         let mut missing: Vec<u32> = solved
             .iter()
-            .flat_map(|(_, opr)| opr.teams.iter().copied())
+            .flat_map(|(_, opr)| opr.teams())
             .filter(|number| !roster.contains_key(number))
             .collect();
         missing.sort_unstable();
@@ -379,7 +379,6 @@ mod event_filter_tests {
 #[cfg(test)]
 mod merge_tests {
     use super::*;
-    use ndarray::Array1;
 
     fn roster(numbers: &[u32]) -> HashMap<u32, Team> {
         numbers
@@ -389,14 +388,11 @@ mod merge_tests {
     }
 
     fn opr(teams: &[u32], scores: &[f64]) -> Opr {
-        let col = || Array1::from_iter(scores.iter().copied());
-        Opr {
-            teams: teams.to_vec(),
-            auto: col(),
-            teleop: col(),
-            endgame: col(),
-            penalties: col(),
-        }
+        Opr(teams
+            .iter()
+            .zip(scores)
+            .map(|(&t, &s)| (t, [s; 4]))
+            .collect())
     }
 
     #[test]
