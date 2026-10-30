@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     let processor = Processor::new(config, year);
 
     tracing::info!("Fetching season data for year {}", year);
-    let (mut teams, matches) = first_api.fetch_season_data(year, all_events).await?;
+    let (teams, matches) = first_api.fetch_season_data(year, all_events).await?;
     tracing::info!(
         "Fetched {} teams, {} match rows",
         teams.len(),
@@ -59,19 +59,16 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    tracing::info!("Merging with existing database");
-    teams = processor.merge_with_database(teams, force_update).await?;
-    tracing::info!("Merge complete");
+    tracing::info!("Merging with the stored season");
+    let stored = processor.stored().await?;
+    let mut season = Processor::merge(&stored, teams, force_update);
+    tracing::info!(teams = season.len(), "Merge complete");
 
-    tracing::info!("Updating rankings");
-    Processor::rank(&mut teams);
+    Processor::rank(&mut season);
     tracing::info!("Rankings updated");
 
-    tracing::info!("Upserting to database");
-    processor.upsert_to_database(&mut teams).await?;
+    processor.upsert_changed(&stored, season).await?;
     processor.upsert_matches(&matches).await?;
-    tracing::info!("Database updated successfully");
-
     tracing::info!("Pipeline complete");
     Ok(())
 }

@@ -1,17 +1,59 @@
 use anyhow::Result;
-use futures::future::try_join_all;
-use model::prelude::{Supabase, Team};
-
-use crate::matches::MatchRow;
 use chrono::Utc;
+use model::prelude::{Supabase, Team};
 use model::tables;
 use std::collections::HashMap;
 
 use crate::config::Config;
+use crate::matches::MatchRow;
 
 const TIE_TOLERANCE: f64 = 1e-6;
-/// Keeps the `in.(…)` filter well under URL length limits.
-const SELECT_CHUNK: usize = 500;
+
+#[derive(Debug, Clone, Copy)]
+enum Metric {
+    Overall,
+    Auto,
+    Teleop,
+    Endgame,
+    Penalties,
+}
+
+impl Metric {
+    const ALL: [Metric; 5] = [
+        Metric::Overall,
+        Metric::Auto,
+        Metric::Teleop,
+        Metric::Endgame,
+        Metric::Penalties,
+    ];
+
+    fn score(self, team: &Team) -> f64 {
+        match self {
+            Metric::Overall => team.overall,
+            Metric::Auto => team.auto,
+            Metric::Teleop => team.teleop,
+            Metric::Endgame => team.endgame,
+            Metric::Penalties => team.penalties,
+        }
+    }
+
+    fn rank(self, team: &mut Team) -> &mut Option<u32> {
+        match self {
+            Metric::Overall => &mut team.overall_rank,
+            Metric::Auto => &mut team.auto_rank,
+            Metric::Teleop => &mut team.tele_rank,
+            Metric::Endgame => &mut team.endgame_rank,
+            Metric::Penalties => &mut team.penalty_rank,
+        }
+    }
+
+    fn highest_first(self) -> bool {
+        match self {
+            Metric::Overall | Metric::Auto | Metric::Teleop | Metric::Endgame => true,
+            Metric::Penalties => false,
+        }
+    }
+}
 
 pub struct Processor {
     client: Supabase,
@@ -39,89 +81,58 @@ impl Processor {
         Ok(())
     }
 
-    pub async fn merge_with_database(
-        &self,
-        mut teams: HashMap<u32, Team>,
+    /// Every team already stored for the season.
+    pub async fn stored(&self) -> Result<HashMap<u32, Team>> {
+        let rows: Vec<Team> = self
+            .client
+            .select_all(&self.table, &[], "teamNumber")
+            .await?;
+        Ok(rows.into_iter().map(|t| (t.number, t)).collect())
+    }
+
+    /// The whole season: stored rows with this run's teams laid over them.
+    pub fn merge(
+        stored: &HashMap<u32, Team>,
+        fetched: HashMap<u32, Team>,
         force_update: bool,
-    ) -> Result<HashMap<u32, Team>> {
-        let numbers: Vec<u32> = teams.keys().copied().collect();
-        let stored = try_join_all(
-            numbers
-                .chunks(SELECT_CHUNK)
-                .map(|chunk| self.client.teams_in(&self.table, chunk)),
-        )
-        .await?;
+    ) -> HashMap<u32, Team> {
+        let mut season = stored.clone();
+        for (number, mut team) in fetched {
+            if let Some(row) = stored.get(&number) {
+                team.add_events(row.events_attended.clone());
+                team.founded = team.founded.or(row.founded);
+                team.website = team.website.take().or_else(|| row.website.clone());
 
-        for row in stored.into_iter().flatten() {
-            let Some(team) = teams.get_mut(&row.number) else {
-                continue;
-            };
-
-            team.add_events(row.events_attended.clone());
-            team.founded = team.founded.or(row.founded);
-            team.website = team.website.take().or_else(|| row.website.clone());
-
-            if !force_update && team.overall <= row.overall {
-                *team = Team {
-                    events_attended: std::mem::take(&mut team.events_attended),
-                    founded: team.founded,
-                    website: team.website.take(),
-                    ..row
-                };
+                if !force_update && team.overall <= row.overall {
+                    team = Team {
+                        events_attended: std::mem::take(&mut team.events_attended),
+                        founded: team.founded,
+                        website: team.website.take(),
+                        ..row.clone()
+                    };
+                }
             }
+            season.insert(number, team);
         }
-
-        Ok(teams)
+        season
     }
 
     pub fn rank(teams: &mut HashMap<u32, Team>) {
         let mut team_list: Vec<&mut Team> = teams.values_mut().collect();
-
-        Self::assign_rank(
-            &mut team_list,
-            |t| t.overall,
-            |t, r| t.overall_rank = Some(r),
-            true,
-        );
-        Self::assign_rank(
-            &mut team_list,
-            |t| t.auto,
-            |t, r| t.auto_rank = Some(r),
-            true,
-        );
-        Self::assign_rank(
-            &mut team_list,
-            |t| t.teleop,
-            |t, r| t.tele_rank = Some(r),
-            true,
-        );
-        Self::assign_rank(
-            &mut team_list,
-            |t| t.endgame,
-            |t, r| t.endgame_rank = Some(r),
-            true,
-        );
-        Self::assign_rank(
-            &mut team_list,
-            |t| t.penalties,
-            |t, r| t.penalty_rank = Some(r),
-            false,
-        );
+        for metric in Metric::ALL {
+            Self::assign_rank(&mut team_list, metric);
+        }
     }
 
     /// Standard competition ranking: 1, 1, 3 — never 1, 1, 2.
-    fn assign_rank<F, S>(teams: &mut [&mut Team], score_fn: F, set_rank: S, reverse: bool)
-    where
-        F: Fn(&Team) -> f64,
-        S: Fn(&mut Team, u32),
-    {
+    fn assign_rank(teams: &mut [&mut Team], metric: Metric) {
         let mut ordered: Vec<(usize, f64)> = teams
             .iter()
-            .map(|team| score_fn(team))
+            .map(|team| metric.score(team))
             .enumerate()
             .collect();
         ordered.sort_by(|(_, a), (_, b)| {
-            if reverse {
+            if metric.highest_first() {
                 b.total_cmp(a)
             } else {
                 a.total_cmp(b)
@@ -134,25 +145,38 @@ impl Processor {
             if previous.is_some_and(|p: f64| (score - p).abs() > TIE_TOLERANCE) {
                 rank = position as u32 + 1;
             }
-            set_rank(teams[index], rank);
+            *metric.rank(teams[index]) = Some(rank);
             previous = Some(score);
         }
     }
 
-    pub async fn upsert_to_database(&self, teams: &mut HashMap<u32, Team>) -> Result<()> {
+    /// Writes only the teams that differ from what is stored.
+    pub async fn upsert_changed(
+        &self,
+        stored: &HashMap<u32, Team>,
+        season: HashMap<u32, Team>,
+    ) -> Result<()> {
         let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-        for team in teams.values_mut() {
-            team.profile_update = Some(timestamp.clone());
-        }
+        let rows: Vec<Team> = changed(stored, season)
+            .map(|mut team| {
+                team.profile_update = Some(timestamp.clone());
+                team
+            })
+            .collect();
 
-        let rows: Vec<&Team> = teams.values().collect();
         self.client.upsert(&self.table, &rows, None).await?;
-        if !rows.is_empty() {
-            tracing::info!("✅ Upserted {} teams to database", rows.len());
-        }
-
+        tracing::info!("✅ Upserted {} changed teams to database", rows.len());
         Ok(())
     }
+}
+
+fn changed(
+    stored: &HashMap<u32, Team>,
+    season: HashMap<u32, Team>,
+) -> impl Iterator<Item = Team> + '_ {
+    season
+        .into_values()
+        .filter(move |team| stored.get(&team.number) != Some(team))
 }
 
 #[cfg(test)]
@@ -275,5 +299,59 @@ mod tests {
         assert!(t.endgame_rank.is_some());
         assert!(t.penalty_rank.is_some());
         assert!(t.overall_rank.is_some());
+    }
+
+    fn stored(teams: Vec<Team>) -> HashMap<u32, Team> {
+        teams.into_iter().map(|t| (t.number, t)).collect()
+    }
+
+    fn scored(number: u32, overall: f64, events: &[&str]) -> Team {
+        let mut t = team(number, overall, 0.0);
+        t.recompute_overall();
+        t.add_events(events.iter().map(|e| e.to_string()));
+        t
+    }
+
+    #[test]
+    fn teams_absent_from_this_run_stay_in_the_season() {
+        let before = stored(vec![scored(1, 10.0, &["A"]), scored(2, 20.0, &["B"])]);
+        let season = Processor::merge(&before, stored(vec![scored(3, 5.0, &["C"])]), false);
+        assert_eq!(season.len(), 3);
+    }
+
+    #[test]
+    fn ranks_span_the_whole_season_not_just_this_run() {
+        let before = stored(vec![scored(1, 50.0, &["A"]), scored(2, 40.0, &["B"])]);
+        let mut season = Processor::merge(&before, stored(vec![scored(3, 45.0, &["C"])]), false);
+        Processor::rank(&mut season);
+
+        assert_eq!(season[&1].overall_rank, Some(1));
+        assert_eq!(season[&3].overall_rank, Some(2));
+        assert_eq!(season[&2].overall_rank, Some(3));
+    }
+
+    #[test]
+    fn a_stronger_stored_event_survives_a_weaker_run() {
+        let before = stored(vec![scored(1, 50.0, &["STRONG"])]);
+        let season = Processor::merge(&before, stored(vec![scored(1, 5.0, &["WEAK"])]), false);
+        assert_eq!(season[&1].auto, 50.0);
+        assert_eq!(season[&1].events_attended, ["STRONG", "WEAK"]);
+    }
+
+    #[test]
+    fn force_update_takes_this_run_over_the_stored_figures() {
+        let before = stored(vec![scored(1, 50.0, &["STRONG"])]);
+        let season = Processor::merge(&before, stored(vec![scored(1, 5.0, &["WEAK"])]), true);
+        assert_eq!(season[&1].auto, 5.0);
+    }
+
+    #[test]
+    fn only_changed_teams_are_written() {
+        let before = stored(vec![scored(1, 50.0, &["A"]), scored(2, 40.0, &["B"])]);
+        let mut season = before.clone();
+        season.get_mut(&2).unwrap().overall_rank = Some(7);
+
+        let written: Vec<u32> = changed(&before, season).map(|t| t.number).collect();
+        assert_eq!(written, [2]);
     }
 }
