@@ -1,8 +1,6 @@
 # ARES — Database Pipeline
 
-Fetches a season from the FIRST API, solves per-team OPR, ranks every team, and upserts to
-Supabase. One run is one pass: fetch, solve, write, exit. The Discord bot reads what this
-writes; table names are shared through [`model::tables`](https://github.com/ares-hq/model).
+Fetches a season from the FIRST API, solves per-team OPR, ranks every team, and upserts to Supabase. One run is one pass: fetch, solve, write, exit. The Discord bot reads what this writes; table names are shared through [`model::tables`](https://github.com/ares-hq/model).
 
 ## Tables
 
@@ -13,8 +11,7 @@ writes; table names are shared through [`model::tables`](https://github.com/ares
 
 `matchcode` hashes match identity, never score, so a rescored match updates in place.
 
-`overallOPR` is `auto + teleop`. Endgame and penalties rank on their own axes, penalties
-ascending.
+`overallOPR` is `auto + teleop`. Endgame and penalties rank on their own axes, penalties ascending.
 
 ## Run
 
@@ -39,9 +36,7 @@ cargo run --release --bin db -- --year 2025 --all-events
 
 ## Deploy
 
-A batch job, so it runs one-shot on a timer rather than as a supervised loop: recent
-events every 15 minutes, the whole season nightly. Setup in
-[`deploy/README.md`](../deploy/README.md).
+A batch job, so it runs one-shot on a timer rather than as a supervised loop: recent events every 15 minutes, the whole season nightly. Setup in [`deploy/README.md`](../deploy/README.md).
 
 ```bash
 sudo systemctl start ares-db.service
