@@ -1,4 +1,3 @@
-use md5::{Digest, Md5};
 use model::first::{Level, MatchInfo, alliance_teams};
 use serde::Serialize;
 
@@ -21,9 +20,10 @@ pub struct MatchRow {
 impl MatchRow {
     /// `matchcode` = `md5("{event}-{level}-{number}-{series}-{color}")`.
     fn hash(event: &str, level: Level, number: i64, series: i64, color: &str) -> String {
-        let mut h = Md5::new();
-        h.update(format!("{event}-{level}-{number}-{series}-{color}").as_bytes());
-        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        format!(
+            "{:x}",
+            md5::compute(format!("{event}-{level}-{number}-{series}-{color}"))
+        )
     }
 
     /// Byes dropped; every level kept.
